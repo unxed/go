@@ -72,7 +72,6 @@ func spawnCall(fn *libcFunc, nargs, a1, a2, a3, a4, a5, a6 uintptr) Errno {
 	return Errno(r)
 }
 
-
 // spawnInChild starts the child with posix_spawn when the request can be
 // expressed that way; ok == false means the caller must fall back to
 // fork+exec. Unlike fork+exec, the child's argv[0] is always the program path
