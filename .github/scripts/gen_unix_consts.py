@@ -23,7 +23,7 @@ for line in open(zerr):
         in_const = False
         continue
     if in_const:
-        m = re.match(r'\t([A-Za-z_][A-Za-z0-9_]*)\s*=', line)
+        m = re.match(r'\t([A-Z][A-Za-z0-9_]*)\s*=', line)
         if m and m.group(1) not in have:
             names.append(m.group(1))
 with open(out, 'w') as f:
