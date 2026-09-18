@@ -799,12 +799,12 @@ func getGodebugEarly() (string, bool) {
 		// GODEBUG directly.
 		// TODO(moehrmann): remove when general goenvs() can be called before cpuinit()
 		n := int32(0)
-		for argv_index(argv, argc+1+n) != nil {
+		for envIndex(n) != nil {
 			n++
 		}
 
 		for i := int32(0); i < n; i++ {
-			p := argv_index(argv, argc+1+i)
+			p := envIndex(i)
 			s := unsafe.String(p, findnull(p))
 
 			if stringslite.HasPrefix(s, prefix) {

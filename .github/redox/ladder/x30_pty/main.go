@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"syscall"
 	"time"
 )
 
@@ -34,12 +35,29 @@ func main() {
 		fmt.Println("FAIL open ptmx:", err)
 		return
 	}
+	// Find the slave: candidates from the master's stat, each verified by an echo.
 	var s *os.File
-	for i := 0; i < 64 && s == nil; i++ {
-		s, _ = os.OpenFile(fmt.Sprintf("/scheme/pty/%d", i), os.O_RDWR, 0)
+	var cands []uint64
+	if fi, err := m.Stat(); err == nil {
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+			fmt.Printf("master stat: ino=%d rdev=%d size=%d mode=%o\n", st.Ino, st.Rdev, st.Size, st.Mode)
+			cands = append(cands, st.Ino, st.Rdev, uint64(st.Size))
+		}
+	}
+	for _, id := range cands {
+		f, err := os.OpenFile(fmt.Sprintf("/scheme/pty/%d", id), os.O_RDWR, 0)
+		if err != nil {
+			continue
+		}
+		m.WriteString("probe\n")
+		if got, err := readWithin(f, 500*time.Millisecond); err == nil && got == "probe\n" {
+			s = f
+			break
+		}
+		f.Close()
 	}
 	if s == nil {
-		fmt.Println("FAIL: cannot find the slave")
+		fmt.Println("FAIL: cannot find the slave of the master")
 		return
 	}
 	fmt.Println("slave:", s.Name())

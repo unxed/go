@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
@@ -48,6 +49,11 @@ int main(void) {
     if (ptsname_r(m, name, sizeof name)) { printf("FAIL ptsname\n"); return 0; }
     s = open(name, O_RDWR | O_NOCTTY);
     printf("master fd %d, slave %s fd %d\n", m, name, s);
+    struct stat st;
+    fstat(m, &st);
+    printf("master stat: ino=%llu rdev=%llu dev=%llu mode=%o size=%lld; slave: ", (unsigned long long)st.st_ino, (unsigned long long)st.st_rdev, (unsigned long long)st.st_dev, (unsigned)st.st_mode, (long long)st.st_size);
+    fstat(s, &st);
+    printf("ino=%llu rdev=%llu mode=%o\n", (unsigned long long)st.st_ino, (unsigned long long)st.st_rdev, (unsigned)st.st_mode);
     if (s < 0) { printf("FAIL open slave\n"); return 0; }
     try_poll("canonical: slave, master writes line", s, m, "hello\n");
     try_poll("canonical: master, slave writes", m, s, "world\n");

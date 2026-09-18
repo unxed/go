@@ -85,13 +85,13 @@ func goenvs_unix() {
 	// guarantee env[] will immediately follow argv. Might cause
 	// problems.
 	n := int32(0)
-	for argv_index(argv, argc+1+n) != nil {
+	for envIndex(n) != nil {
 		n++
 	}
 
 	envs = make([]string, n)
 	for i := int32(0); i < n; i++ {
-		envs[i] = gostring(argv_index(argv, argc+1+i))
+		envs[i] = gostring(envIndex(i))
 	}
 }
 

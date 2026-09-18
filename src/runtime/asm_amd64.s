@@ -21,6 +21,10 @@ TEXT _rt0_amd64(SB),NOSPLIT,$-8
 // external linking. The C startup code will call the symbol "main"
 // passing argc and argv in the usual C ABI registers DI and SI.
 TEXT main(SB),NOSPLIT,$-8
+#ifdef GOOS_redox
+	// relibc's crt0 (external linking / cgo) calls main(argc, argv, envp).
+	MOVQ	DX, runtime·redoxEnvp(SB)
+#endif
 	JMP	runtime·rt0_go(SB)
 
 // _rt0_amd64_lib is common startup code for most amd64 systems when
