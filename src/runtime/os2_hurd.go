@@ -143,9 +143,8 @@ var (
 )
 
 const (
-	// glibc's generic <bits/time.h> clockid_t values; not yet independently
-	// probed on Hurd (see unxed/debian-hurd RESULTS.md TODO). Standard
-	// across every other glibc port, extremely likely to be shared here too.
+	// glibc's generic <bits/time.h> clockid_t values, confirmed on real
+	// Hurd (unxed/debian-hurd poc/abi_probe.c: clock_gettime works with both).
 	_CLOCK_REALTIME  = 0
 	_CLOCK_MONOTONIC = 1
 )
@@ -170,20 +169,14 @@ func getPageSize() uintptr {
 }
 
 func osinit() {
-	println("DEBUG osinit: start")
-	pid := sysvicall0(&libc_getpid)
-	println("DEBUG osinit: getpid via sysvicall0 =", pid)
 	// Call miniterrno so that we can safely make system calls
 	// before calling minit on m0.
 	asmcgocall(unsafe.Pointer(abi.FuncPCABI0(miniterrno)), unsafe.Pointer(&libc__errnop))
-	println("DEBUG osinit: after miniterrno")
 
 	numCPUStartup = getCPUCount()
-	println("DEBUG osinit: numCPUStartup=", numCPUStartup)
 	if physPageSize == 0 {
 		physPageSize = getPageSize()
 	}
-	println("DEBUG osinit: done, physPageSize=", physPageSize)
 }
 
 func tstart_sysvicall(newm *m) uint32
@@ -209,13 +202,11 @@ func newosproc(mp *m) {
 
 	// Disable signals during create, so that the new thread starts
 	// with signals disabled. It will enable them in minit.
-	println("DEBUG newosproc: before sigprocmask+pthread_create")
 	sigprocmask(_SIG_SETMASK, &sigset_all, &oset)
 	ret = retryOnEAGAIN(func() int32 {
 		return pthread_create(&tid, &attr, abi.FuncPCABI0(tstart_sysvicall), unsafe.Pointer(mp))
 	})
 	sigprocmask(_SIG_SETMASK, &oset, nil)
-	println("DEBUG newosproc: after pthread_create, ret=", ret)
 	if ret != 0 {
 		print("runtime: failed to create new OS thread (have ", mcount(), " already; errno=", ret, ")\n")
 		if ret == -_EAGAIN {
@@ -257,15 +248,11 @@ func miniterrno()
 // Called to initialize a new m (including the bootstrap m).
 // Called on the new thread, cannot allocate memory.
 func minit() {
-	println("DEBUG minit: start")
 	asmcgocall(unsafe.Pointer(abi.FuncPCABI0(miniterrno)), unsafe.Pointer(&libc__errnop))
-	println("DEBUG minit: after miniterrno")
 
 	minitSignals()
-	println("DEBUG minit: after minitSignals")
 
 	getg().m.procid = uint64(pthread_self())
-	println("DEBUG minit: done")
 }
 
 // Called from dropm to undo the effect of an minit.
@@ -518,7 +505,6 @@ func raise(sig uint32) /* int32 */ {
 }
 
 func raiseproc(sig uint32) /* int32 */ {
-	pid := sysvicall0(&libc_getpid)
 	sysvicall2(&libc_kill, pid, uintptr(sig))
 }
 
