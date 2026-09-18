@@ -423,7 +423,17 @@ func closefd(fd int32) int32 {
 
 //go:nosplit
 func exit(r int32) {
+	// TEMPORARY (exit-hang investigation): marks that Go's exit path reached libc _exit.
+	dbgmsg("DBG exit: calling _exit\n")
 	sysvicall1(&libc_exit, uintptr(r))
+	dbgmsg("DBG exit: _exit returned?!\n")
+}
+
+// TEMPORARY (exit-hang investigation).
+//
+//go:nosplit
+func dbgmsg(s string) {
+	write1(2, unsafe.Pointer(unsafe.StringData(s)), int32(len(s)))
 }
 
 //go:nosplit

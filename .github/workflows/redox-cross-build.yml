@@ -141,6 +141,11 @@ jobs:
               rc=`cat /tmp/rc.done`
             else
               echo "HANG $bin"
+              # kernel view of every thread of the hung process (STAT: U=user; R=runnable S=sleeping B=blocked Z=dead; + = on a CPU)
+              b=`basename $bin .bin`
+              echo "--- /scheme/sys/context rows for $b"
+              cat /scheme/sys/context 2>&1 | grep -E "^PID|$b"
+              echo "---"
               kill -9 $sp 2>/dev/null
               rc=hang
             fi
@@ -165,6 +170,11 @@ jobs:
           run_one /root/mnt/p04_gc.bin default 1
           run_one /root/mnt/p09_stack.bin default 1
           run_one /root/mnt/p08_memzero.bin default 1
+          # exit-hang probe (diagnostic): many runs of a program that returns from main with several Ms alive
+          n=1
+          while [ $n -le 20 ]; do run_one /root/mnt/x11_exitloop.bin default $n; n=$((n+1)); done
+          n=1
+          while [ $n -le 10 ]; do run_one /root/mnt/x11_exitloop.bin procs1 $n; n=$((n+1)); done
           echo "=== LADDER DONE"
           EOF
           ls -la out
@@ -189,8 +199,24 @@ jobs:
         timeout-minutes: 5
         run: |
           docker pull redoxos/redoxer >/dev/null
-          timeout 240 docker run --rm -e REDOXER_QEMU_ARGS='-smp 2' -v /tmp/ladder/out:/mnt redoxos/redoxer \
-            redoxer exec -f /mnt -- sh /root/mnt/run_ladder.sh 2>&1 | tee /tmp/redoxer-exec.log
+          : > /tmp/redoxer-exec.log
+          ( timeout 270 docker run --name ladder --rm -e REDOXER_QEMU_ARGS='-smp 2' -v /tmp/ladder/out:/mnt redoxos/redoxer \
+              redoxer exec -f /mnt -- sh /root/mnt/run_ladder.sh > /tmp/redoxer-exec.log 2>&1 ) &
+          dpid=$!
+          last=0; idle=0
+          while kill -0 $dpid 2>/dev/null; do
+            sleep 5
+            size=$(stat -c %s /tmp/redoxer-exec.log)
+            if [ "$size" = "$last" ]; then idle=$((idle+5)); else idle=0; last=$size; fi
+            grep -aq "LADDER DONE" /tmp/redoxer-exec.log && break
+            if [ $idle -ge 75 ]; then
+              echo "VM FROZE: no output for ${idle}s; last line: $(tail -c 200 /tmp/redoxer-exec.log | tr -d '\r' | tail -1)" | tee -a /tmp/redoxer-exec.log
+              docker kill ladder 2>/dev/null
+              break
+            fi
+          done
+          docker kill ladder 2>/dev/null; wait $dpid 2>/dev/null
+          cat /tmp/redoxer-exec.log | tail -5
 
       - name: Upload redoxer exec log
         if: always()
