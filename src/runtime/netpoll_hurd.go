@@ -30,10 +30,11 @@ type pollfd struct {
 	revents int16
 }
 
+// Measured on real Hurd (poc/abi_probe.c); same values as Linux, unlike Haiku.
 const _POLLIN = 0x0001
-const _POLLOUT = 0x0002
-const _POLLHUP = 0x0080
-const _POLLERR = 0x0004
+const _POLLOUT = 0x0004
+const _POLLERR = 0x0008
+const _POLLHUP = 0x0010
 
 var (
 	pfds           []pollfd

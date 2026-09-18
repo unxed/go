@@ -55,3 +55,12 @@ Behaves like Solaris/Haiku for the cgo `libc_xxx` symbol scheme, but like Linux/
 - Native `gsync`-based `lock_futex_hurd.go` (currently POSIX semaphores via `lock_sema.go`).
 - `go test` on the runtime; `crash_test.go`/`export_pipe2_test.go`/`semasleep_test.go` build tags.
 - Upstreaming: not planned yet.
+
+## 2026-09-18 — poll/sigmask constants measured (abi_probe.c, run-hurd-poc #35372599009)
+
+`_POLLIN/_POLLOUT/_POLLERR/_POLLHUP`, `_SS_DISABLE`, `_SIG_UNBLOCK`, `_SIG_SETMASK`, `_NSIG`
+had been copied from Haiku and never measured. On real Hurd:
+
+- `POLLIN=1 POLLOUT=4 POLLERR=8 POLLHUP=16` — same as Linux, NOT Haiku. `netpoll_hurd.go` had
+  `POLLOUT=2 POLLERR=4 POLLHUP=0x80` (all three wrong; would have broken the netpoller); fixed.
+- `SS_DISABLE=4 SIG_UNBLOCK=2 SIG_SETMASK=3 _NSIG=33` — already correct in `os_hurd.go`.

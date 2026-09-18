@@ -27,12 +27,13 @@ type mOS struct {
 	scratch mscratch
 }
 
+// All values below measured on real Hurd with poc/abi_probe.c.
 const (
 	_SS_DISABLE  = 4
 	_NSIG        = 33 // __SIGRTMAX + 1; Hurd has no real-time signals
 	_SI_USER     = 0
 	_SIG_SETMASK = 3
-	_RLIMIT_AS   = 10 // measured via abi_probe.c on real Hurd
+	_RLIMIT_AS   = 10
 	_SIG_UNBLOCK = 2
 )
 
