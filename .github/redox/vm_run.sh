@@ -6,7 +6,7 @@
 script=$1; log=$2
 docker pull redoxos/redoxer >/dev/null
 : > $log
-( timeout 300 docker run --name ladder --rm -e REDOXER_QEMU_ARGS='-smp 2' -v /tmp/pkg/out:/mnt redoxos/redoxer \
+( timeout 300 docker run --name ladder --rm -e REDOXER_QEMU_ARGS='-smp 2' -v ${PKGOUT:-/tmp/pkg/out}:/mnt redoxos/redoxer \
     redoxer exec -f /mnt -- sh /root/mnt/$script > $log 2>&1 ) &
 dpid=$!
 last=0; idle=0

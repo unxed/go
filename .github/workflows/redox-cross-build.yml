@@ -132,6 +132,37 @@ jobs:
           cat /tmp/pkg/ladder-build.txt
           ls -la /tmp/pkg/out
 
+      # Cross-compiled std test binaries (go test -c) for a small set of packages.
+      - name: Build std test binaries
+        timeout-minutes: 4
+        continue-on-error: true
+        run: |
+          export GOROOT=$(pwd)
+          export PATH=$GOROOT/bin:$PATH
+          rm -rf /tmp/pkgt && mkdir -p /tmp/pkgt/out/data
+          for p in strings bytes sort container/list encoding/json sync time; do
+            n=$(echo $p | tr / _)
+            mkdir -p /tmp/pkgt/out/data/$n
+            if GOOS=redox GOARCH=amd64 CGO_ENABLED=0 go test -c -o /tmp/pkgt/out/$n.test $p > /tmp/pkgt/test-build-$n.log 2>&1; then
+              echo "$n TESTBUILD_OK"
+              [ -d src/$p/testdata ] && cp -r src/$p/testdata /tmp/pkgt/out/data/$n/
+              chmod +x /tmp/pkgt/out/$n.test
+            else
+              echo "$n TESTBUILD_FAIL"; head -40 /tmp/pkgt/test-build-$n.log
+            fi
+          done
+          cp .github/redox/run_common.sh /tmp/pkgt/out/common.sh
+          cp .github/redox/run_tests.sh /tmp/pkgt/out/
+          du -sh /tmp/pkgt/out; ls -la /tmp/pkgt/out
+
+      - name: Upload std test binaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redox-std-tests
+          path: /tmp/pkgt
+          if-no-files-found: ignore
+
       - name: Upload build logs and binaries
         if: always()
         uses: actions/upload-artifact@v4
@@ -193,3 +224,29 @@ jobs:
       - name: Exit-probe summary (diagnostic; never fails the job)
         if: always()
         run: python3 .github/redox/ladder_summary.py /tmp/redoxer-exit.log exit || true
+
+  vm-tests:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: redox-std-tests
+          path: /tmp/pkgt
+      - name: Run the std test binaries under redoxer
+        continue-on-error: true
+        timeout-minutes: 8
+        run: |
+          chmod +x /tmp/pkgt/out/*.test
+          PKGOUT=/tmp/pkgt/out .github/redox/vm_run.sh run_tests.sh /tmp/redoxer-tests.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: redoxer-tests-output
+          path: /tmp/redoxer-tests.log
+          if-no-files-found: ignore
+      - name: Per-package results
+        if: always()
+        run: python3 .github/redox/test_summary.py /tmp/redoxer-tests.log
