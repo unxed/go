@@ -1,0 +1,91 @@
+name: redox-cross-build
+
+on:
+  push:
+    branches: [golang-1.26-redox]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build host (linux/amd64) toolchain
+        working-directory: src
+        run: |
+          export GOROOT_BOOTSTRAP=$(dirname $(dirname $(which go)))
+          echo "GOROOT_BOOTSTRAP=$GOROOT_BOOTSTRAP"
+          ./make.bash
+
+      - name: Write trivial hello-world test program (no stdlib imports)
+        run: |
+          mkdir -p /tmp/redoxhello
+          cat > /tmp/redoxhello/main.go <<'EOF'
+          package main
+
+          func main() {
+              println("hello from redox")
+          }
+          EOF
+          cat > /tmp/redoxhello/go.mod <<'EOF'
+          module redoxhello
+
+          go 1.26
+          EOF
+
+      - name: Cross-compile for GOOS=redox GOARCH=amd64 (CGO_ENABLED=1)
+        run: |
+          export GOROOT=$(pwd)
+          export PATH=$GOROOT/bin:$PATH
+          go version
+          cd /tmp/redoxhello
+          GOOS=redox GOARCH=amd64 CGO_ENABLED=1 go build -x -o redoxhello.bin . 2>&1 | tee /tmp/build.log
+          echo "BUILD_RC=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Show result
+        if: always()
+        run: |
+          echo "build rc: $BUILD_RC"
+          file /tmp/redoxhello/redoxhello.bin 2>/dev/null || echo "(no binary produced)"
+          echo "### Cross-build result: rc=$BUILD_RC" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log and binary (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redox-cross-build-output
+          path: |
+            /tmp/build.log
+            /tmp/redoxhello/redoxhello.bin
+          if-no-files-found: warn
+
+      # Best-effort only: unlike the hurd port, Redox has a real cross C
+      # compiler and a QEMU-based "run it for real" story via redoxer, so
+      # try it -- but GitHub-hosted runners have no /dev/kvm, so a full
+      # QEMU boot under TCG can be slow; this step is timeboxed and
+      # non-blocking (continue-on-error) so a redoxer/QEMU plumbing issue
+      # doesn't hide the primary cross-build signal above.
+      - name: Try running the cross-built binary under redoxer (best effort)
+        if: env.BUILD_RC == '0'
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          docker pull redoxos/redoxer
+          docker run --rm -v /tmp/redoxhello:/mnt redoxos/redoxer \
+            redoxer exec -- /mnt/redoxhello.bin 2>&1 | tee /tmp/redoxer-exec.log
+
+      - name: Upload redoxer exec log (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redoxer-exec-output
+          path: /tmp/redoxer-exec.log
+          if-no-files-found: ignore
