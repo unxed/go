@@ -395,17 +395,36 @@ func semasleep(ns int64) int32 {
 		}
 		return 0
 	}
+	// Never sleep unboundedly: Redox's kernel keys futexes by physical
+	// address, so a page that becomes copy-on-write (any fork() in a
+	// multi-threaded process; Go itself avoids fork where it can, but
+	// SysProcAttr{Setsid, Setctty, ...} still needs it) moves to a new frame
+	// when the parent next writes it, and a sem_post/FUTEX_WAKE for the new
+	// address never reaches a thread that went to sleep on the old one. Wake up
+	// every 100 ms and re-check the semaphore itself, which the sleeper reads
+	// through its own (already updated) mapping: a lost wake-up then costs
+	// latency instead of hanging the program. See .github/redox/UPSTREAM.md #2.
 	for {
-		r1, err := sem_wait((*semt)(unsafe.Pointer(mp.waitsema)))
+		var ts timespec
+		if clock_gettime(_CLOCK_REALTIME, &ts) != 0 {
+			throw("clock_gettime")
+		}
+		ts.tv_nsec += 100 * 1e6
+		if ts.tv_nsec >= 1e9 {
+			ts.tv_sec++
+			ts.tv_nsec -= 1e9
+		}
+		r1, err := sem_timedwait((*semt)(unsafe.Pointer(mp.waitsema)), &ts)
 		if r1 == 0 {
 			break
 		}
 		// relibc's Semaphore::wait propagates futex_wait's EAGAIN (the
 		// count changed between try_wait and sleeping) instead of looping
 		// as Linux's futex-based implementations do; retry it like EINTR.
-		if err == _EINTR || err == _EAGAIN {
+		if err == _ETIMEDOUT || err == _EINTR || err == _EAGAIN {
 			continue
 		}
+		println("sem_timedwait err ", err, " id ", mp.id)
 		throw("sem_wait")
 	}
 	return 0

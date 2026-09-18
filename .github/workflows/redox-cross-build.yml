@@ -31,8 +31,16 @@ jobs:
         run: |
           sudo tee /usr/local/bin/redox-cc >/dev/null <<'EOF'
           #!/bin/sh
-          exec docker run --rm -i -v /tmp:/tmp -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$PWD" \
+          docker run --rm -i -v /tmp:/tmp -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$PWD" \
             redoxos/redoxer redoxer cc "$@"
+          rc=$?
+          # the container runs as root: hand every -o output back to the caller
+          prev=""
+          for a in "$@"; do
+            [ "$prev" = "-o" ] && sudo chown "$(id -u):$(id -g)" "$a" 2>/dev/null
+            prev="$a"
+          done
+          exit $rc
           EOF
           sudo chmod +x /usr/local/bin/redox-cc
 
