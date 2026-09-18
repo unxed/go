@@ -69,6 +69,17 @@ jobs:
           grep -c '^#' /tmp/std.log | sed 's/^/std packages with errors: /' | tee -a /tmp/pkgcheck.log
           gofmt -l src/syscall src/os src/internal/syscall/unix src/internal/poll src/runtime 2>&1 | grep -i hurd | sed 's/^/gofmt: /' | tee -a /tmp/pkgcheck.log || true
 
+      - name: gofmt the Hurd files (produces a patch)
+        if: always()
+        run: |
+          export GOROOT=$(pwd)
+          export PATH=$GOROOT/bin:$PATH
+          FILES=$(git ls-files 'src/*hurd*.go' 'src/*hurd*/*.go' | grep -v '_test.go' || true)
+          gofmt -w $FILES
+          git diff > /tmp/gofmt-hurd.patch
+          wc -l /tmp/gofmt-hurd.patch
+          git checkout -- .
+
       - name: Build Go test programs for Hurd
         if: always()
         run: |
@@ -100,6 +111,7 @@ jobs:
             /tmp/build.log
             /tmp/hurdhello/hurdhello.bin
             /tmp/pkgcheck.log
+            /tmp/gofmt-hurd.patch
             /tmp/std.log
             /tmp/gotests/out
           if-no-files-found: warn

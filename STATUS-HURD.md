@@ -64,3 +64,43 @@ had been copied from Haiku and never measured. On real Hurd:
 - `POLLIN=1 POLLOUT=4 POLLERR=8 POLLHUP=16` — same as Linux, NOT Haiku. `netpoll_hurd.go` had
   `POLLOUT=2 POLLERR=4 POLLHUP=0x80` (all three wrong; would have broken the netpoller); fixed.
 - `SS_DISABLE=4 SIG_UNBLOCK=2 SIG_SETMASK=3 _NSIG=33` — already correct in `os_hurd.go`.
+
+## 2026-09-18 — Phase 2 milestone: `fmt.Println`, files, pipes, goroutines run on real Hurd
+
+`syscall`, `internal/syscall/unix`, `internal/poll`, `os` (and everything above them: `fmt`, `time`,
+`sync`, ...) are ported. Programs in `misc/hurd/tests` (`t_os`, `t_fmt`, `t_fs`, `t_rt`), cross-built in
+CI, all run on Debian GNU/Hurd in QEMU with exit code 0: `fmt.Println/Printf`, `os.Stat/ReadFile/
+WriteFile/ReadDir/Remove/Getwd/Hostname/Pipe`, goroutines, `time.Sleep`, tickers, GC (unxed/debian-hurd
+run-hurd-poc #35380952163).
+
+### How the layers were produced (measured, not guessed)
+- `zerrors_hurd_amd64.go` and `ztypes_hurd_amd64.go` are *generated on the Hurd guest* by
+  `poc/mkhurd.sh` + `poc/mkztypes_hurd.c` (unxed/debian-hurd) from the real glibc headers: constants use
+  the same `#define` filter as `syscall/mkerrors.sh`; struct layouts come from `offsetof/sizeof` with
+  explicit `Pad_cgo_N` and compile-time `unsafe.Sizeof` assertions. The guest has no Go, so `cgo -godefs`
+  is not used. Re-run with `run-hurd-poc.yml` input `mkhurd=true`; files arrive in artifact `hurd-generated`.
+- `zsyscall_hurd_amd64.go` is derived mechanically from `zsyscall_haiku_amd64.go` (every symbol is in
+  `libc.so.0.3`, verified with dlsym); runtime shims `runtime/syscall{,2}_hurd.go` come from Haiku's.
+
+### Facts measured on real Hurd (phase 2)
+- POSIX errno are Mach codes `0x40000000|n`. `EKERN_*` (small) and `EMIG_*` (negative) also live in
+  `<errno.h>` but are NOT errno: they must stay out of the `Errno` block and the message table (first
+  generator version produced duplicate/negative table indices). `Errno.Error()` indexes the table by
+  `errno & 0xffff` (special case in `syscall_unix.go`, like Haiku's).
+- `struct stat` is 192 bytes (`st_fstype`, `st_fsid`(=st_dev), `st_gen`, ... become padding), `dev_t/ino_t/
+  nlink_t/blksize_t/blkcnt_t` 8 bytes, `mode_t` 4. `struct dirent` = {ino u64, reclen u16, type u8,
+  namlen u8, name[]}. `PATH_MAX` is undefined (we use 4096). `fd_set` is only 256 bits.
+- sockaddr has BSD-style `sa_len` and an 8-bit family; `sockaddr_in`=16, `sockaddr_in6`=28,
+  `sockaddr_un`=110 bytes. `Msghdr.Iovlen` is 32-bit.
+- `getdirentries()` fails with `ENOSYS`; `fdopendir` + `readdir_r` work, so `syscall.ReadDirent` is
+  emulated as on Haiku. ext2fs returns `d_type == DT_UNKNOWN`.
+- `UTIME_OMIT=-2`, `UTIME_NOW=-1`, `AT_FDCWD=-100`, `AT_SYMLINK_NOFOLLOW=0x100`, `AT_REMOVEDIR=AT_EACCESS=0x200`,
+  `O_CLOEXEC=0x400000`, `O_DIRECTORY=0x200000`, `SOCK_CLOEXEC=0x400000`, `SOCK_NONBLOCK=0x800`.
+- Present in libc.so.0.3: `pipe2 accept4 dup3 openat/fstatat/... waitid posix_spawn getrandom getentropy
+  stat/fstat/lstat` and all socket calls (no libsocket). Absent: `getdents`, `issetugid`, `res_init`.
+- Wait status uses glibc's generic encoding (low 7 bits signal, 0x80 core, 0x7f stopped).
+
+### Not done yet
+- `net` (does not compile: needs `sock_*`, `sockopt_hurd`, `interface_*`, ...): next phase.
+- `os/exec` / `fork` in a multithreaded process on glibc Hurd — untested.
+- `GRND_*` are hard-coded (glibc values, not probed on Hurd).
