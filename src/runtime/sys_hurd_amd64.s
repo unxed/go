@@ -247,6 +247,18 @@ exit:
 	ADDQ    $168, SP
 	RET
 
+// sigfwd forwards a signal to a non-Go handler (used by sigfwdgo).
+TEXT runtime·sigfwd(SB),NOSPLIT,$0-32
+	MOVQ	fn+0(FP),    AX
+	MOVL	sig+8(FP),   DI
+	MOVQ	info+16(FP), SI
+	MOVQ	ctx+24(FP),  DX
+	MOVQ	SP, BX		// callee-saved
+	ANDQ	$~15, SP	// alignment for x86_64 ABI
+	CALL	AX
+	MOVQ	BX, SP
+	RET
+
 // Called from runtime·usleep (Go). Can be called on Go stack, on OS stack,
 // can also be called in cgo callback path without a g->m.
 TEXT runtime·usleep1(SB),NOSPLIT,$0

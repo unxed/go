@@ -106,6 +106,10 @@ const (
 	_SC_SEARCH_MAX = 2048
 )
 
+// sigtrampgoIndirect breaks the linker's nosplit stack-depth chain between
+// sigtrampgohurd and sigtrampgo (the same trick as adjustSignalStack2Indirect).
+var sigtrampgoIndirect = sigtrampgo
+
 // sigtrampgohurd is called by sigtramp (sys_hurd_amd64.s) and wraps sigtrampgo.
 //
 //go:nosplit
@@ -129,7 +133,7 @@ func sigtrampgohurd(sig uint32, info *siginfo, ctx unsafe.Pointer) {
 		}
 	}
 
-	sigtrampgo(sig, info, ctx)
+	sigtrampgoIndirect(sig, info, ctx)
 
 	if adjusted {
 		restoreGsignalStack(&saved)
