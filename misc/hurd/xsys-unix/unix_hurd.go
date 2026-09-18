@@ -73,77 +73,34 @@ const (
 	tcsaFlush = 2
 )
 
-func sysvicall6(trap, nargs, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uintptr, err syscall.Errno)
-func rawSysvicall6(trap, nargs, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uintptr, err syscall.Errno)
+// extCall is provided by package syscall (ext_hurd.go) via a pushed linkname.
+//
+//go:linkname extCall syscall.extCall
+func extCall(idx, nargs, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uintptr, err syscall.Errno)
 
-type libcFunc uintptr
-
-//go:cgo_import_dynamic libcx_tcgetattr tcgetattr "libc.so.0.3"
-//go:cgo_import_dynamic libcx_tcsetattr tcsetattr "libc.so.0.3"
-//go:cgo_import_dynamic libcx_ioctl ioctl "libc.so.0.3"
-//go:cgo_import_dynamic libcx_poll poll "libc.so.0.3"
-//go:cgo_import_dynamic libcx_mprotect mprotect "libc.so.0.3"
-//go:cgo_import_dynamic libcx_fcntl fcntl "libc.so.0.3"
-//go:cgo_import_dynamic libcx_fchmodat fchmodat "libc.so.0.3"
-//go:cgo_import_dynamic libcx_utimensat utimensat "libc.so.0.3"
-//go:cgo_import_dynamic libcx_uname uname "libc.so.0.3"
-//go:cgo_import_dynamic libcx_select select "libc.so.0.3"
-//go:cgo_import_dynamic libcx_getpgid getpgid "libc.so.0.3"
-//go:cgo_import_dynamic libcx_posix_openpt posix_openpt "libc.so.0.3"
-//go:cgo_import_dynamic libcx_grantpt grantpt "libc.so.0.3"
-//go:cgo_import_dynamic libcx_unlockpt unlockpt "libc.so.0.3"
-//go:cgo_import_dynamic libcx_ptsname_r ptsname_r "libc.so.0.3"
-//go:cgo_import_dynamic libcx_flock flock "libc.so.0.3"
-//go:cgo_import_dynamic libcx_mmap mmap "libc.so.0.3"
-
-//go:linkname libcx_tcgetattr libcx_tcgetattr
-//go:linkname libcx_tcsetattr libcx_tcsetattr
-//go:linkname libcx_ioctl libcx_ioctl
-//go:linkname libcx_poll libcx_poll
-//go:linkname libcx_mprotect libcx_mprotect
-//go:linkname libcx_fcntl libcx_fcntl
-//go:linkname libcx_fchmodat libcx_fchmodat
-//go:linkname libcx_utimensat libcx_utimensat
-//go:linkname libcx_uname libcx_uname
-//go:linkname libcx_select libcx_select
-//go:linkname libcx_getpgid libcx_getpgid
-//go:linkname libcx_posix_openpt libcx_posix_openpt
-//go:linkname libcx_grantpt libcx_grantpt
-//go:linkname libcx_unlockpt libcx_unlockpt
-//go:linkname libcx_ptsname_r libcx_ptsname_r
-//go:linkname libcx_flock libcx_flock
-//go:linkname libcx_mmap libcx_mmap
-
-var (
-	libcx_tcgetattr,
-	libcx_tcsetattr,
-	libcx_ioctl,
-	libcx_poll,
-	libcx_mprotect,
-	libcx_fcntl,
-	libcx_fchmodat,
-	libcx_utimensat,
-	libcx_uname,
-	libcx_select,
-	libcx_getpgid,
-	libcx_posix_openpt,
-	libcx_grantpt,
-	libcx_unlockpt,
-	libcx_ptsname_r,
-	libcx_flock,
-	libcx_mmap libcFunc
+// Indexes understood by extCall (keep in sync with syscall/ext_hurd.go).
+const (
+	extTcgetattr = iota
+	extTcsetattr
+	extIoctl
+	extPoll
+	extMprotect
+	extFcntl
+	extFchmodat
+	extUtimensat
+	extFlock
+	extMmap
+	extGetpgid
+	extPosixOpenpt
+	extGrantpt
+	extUnlockpt
+	extPtsnameR
 )
 
-func call(fn *libcFunc, n uintptr, a1, a2, a3, a4, a5, a6 uintptr) (uintptr, error) {
-	r, _, e := sysvicall6(uintptr(unsafe.Pointer(fn)), n, a1, a2, a3, a4, a5, a6)
-	if e != 0 {
-		return r, e
-	}
-	return r, nil
-}
 
-func callErr(fn *libcFunc, n uintptr, a1, a2, a3, a4, a5, a6 uintptr) error {
-	r, _, e := sysvicall6(uintptr(unsafe.Pointer(fn)), n, a1, a2, a3, a4, a5, a6)
+
+func callErr(idx, n uintptr, a1, a2, a3, a4, a5, a6 uintptr) error {
+	r, _, e := extCall(idx, n, a1, a2, a3, a4, a5, a6)
 	if int(r) == -1 {
 		if e == 0 {
 			e = syscall.EINVAL
@@ -157,7 +114,7 @@ func callErr(fn *libcFunc, n uintptr, a1, a2, a3, a4, a5, a6 uintptr) error {
 
 func IoctlGetTermios(fd int, req uint) (*Termios, error) {
 	var t Termios
-	if err := callErr(&libcx_tcgetattr, 2, uintptr(fd), uintptr(unsafe.Pointer(&t)), 0, 0, 0, 0); err != nil {
+	if err := callErr(extTcgetattr, 2, uintptr(fd), uintptr(unsafe.Pointer(&t)), 0, 0, 0, 0); err != nil {
 		return nil, err
 	}
 	return &t, nil
@@ -171,24 +128,24 @@ func IoctlSetTermios(fd int, req uint, value *Termios) error {
 	case TCSETSF:
 		how = tcsaFlush
 	}
-	return callErr(&libcx_tcsetattr, 3, uintptr(fd), how, uintptr(unsafe.Pointer(value)), 0, 0, 0)
+	return callErr(extTcsetattr, 3, uintptr(fd), how, uintptr(unsafe.Pointer(value)), 0, 0, 0)
 }
 
 func IoctlGetWinsize(fd int, req uint) (*Winsize, error) {
 	var ws Winsize
-	if err := callErr(&libcx_ioctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(&ws)), 0, 0, 0); err != nil {
+	if err := callErr(extIoctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(&ws)), 0, 0, 0); err != nil {
 		return nil, err
 	}
 	return &ws, nil
 }
 
 func IoctlSetWinsize(fd int, req uint, value *Winsize) error {
-	return callErr(&libcx_ioctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(value)), 0, 0, 0)
+	return callErr(extIoctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(value)), 0, 0, 0)
 }
 
 func IoctlGetInt(fd int, req uint) (int, error) {
 	var v int32
-	if err := callErr(&libcx_ioctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(&v)), 0, 0, 0); err != nil {
+	if err := callErr(extIoctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(&v)), 0, 0, 0); err != nil {
 		return 0, err
 	}
 	return int(v), nil
@@ -196,7 +153,7 @@ func IoctlGetInt(fd int, req uint) (int, error) {
 
 func IoctlSetInt(fd int, req uint, value int) error {
 	v := int32(value)
-	return callErr(&libcx_ioctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(&v)), 0, 0, 0)
+	return callErr(extIoctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(&v)), 0, 0, 0)
 }
 
 // Poll.
@@ -206,7 +163,7 @@ func Poll(fds []PollFd, timeout int) (int, error) {
 	if len(fds) > 0 {
 		p = unsafe.Pointer(&fds[0])
 	}
-	r, _, e := sysvicall6(uintptr(unsafe.Pointer(&libcx_poll)), 3, uintptr(p), uintptr(len(fds)), uintptr(timeout), 0, 0, 0)
+	r, _, e := extCall(extPoll, 3, uintptr(p), uintptr(len(fds)), uintptr(timeout), 0, 0, 0)
 	if int(r) == -1 {
 		return -1, e
 	}
@@ -227,7 +184,7 @@ func Mprotect(b []byte, prot int) error {
 	if len(b) == 0 {
 		return nil
 	}
-	return callErr(&libcx_mprotect, 3, uintptr(unsafe.Pointer(&b[0])), uintptr(len(b)), uintptr(prot), 0, 0, 0)
+	return callErr(extMprotect, 3, uintptr(unsafe.Pointer(&b[0])), uintptr(len(b)), uintptr(prot), 0, 0, 0)
 }
 
 // Files.
@@ -293,7 +250,7 @@ func SetsockoptInt(fd, level, opt int, value int) error { return syscall.Setsock
 func GetsockoptInt(fd, level, opt int) (int, error)     { return syscall.GetsockoptInt(fd, level, opt) }
 
 func Fcntl(fd int, cmd int, arg uintptr) (int, error) {
-	r, _, e := sysvicall6(uintptr(unsafe.Pointer(&libcx_fcntl)), 3, uintptr(fd), uintptr(cmd), arg, 0, 0, 0)
+	r, _, e := extCall(extFcntl, 3, uintptr(fd), uintptr(cmd), arg, 0, 0, 0)
 	if int(r) == -1 {
 		return -1, e
 	}
@@ -309,7 +266,7 @@ func Fchmodat(dirfd int, path string, mode uint32, flags int) error {
 	if err != nil {
 		return err
 	}
-	return callErr(&libcx_fchmodat, 4, uintptr(dirfd), uintptr(unsafe.Pointer(p)), uintptr(mode), uintptr(flags), 0, 0)
+	return callErr(extFchmodat, 4, uintptr(dirfd), uintptr(unsafe.Pointer(p)), uintptr(mode), uintptr(flags), 0, 0)
 }
 
 func UtimesNanoAt(dirfd int, path string, ts []Timespec, flags int) error {
@@ -320,7 +277,7 @@ func UtimesNanoAt(dirfd int, path string, ts []Timespec, flags int) error {
 	if err != nil {
 		return err
 	}
-	return callErr(&libcx_utimensat, 4, uintptr(dirfd), uintptr(unsafe.Pointer(p)), uintptr(unsafe.Pointer(&ts[0])), uintptr(flags), 0, 0)
+	return callErr(extUtimensat, 4, uintptr(dirfd), uintptr(unsafe.Pointer(p)), uintptr(unsafe.Pointer(&ts[0])), uintptr(flags), 0, 0)
 }
 
 // Lutimes sets the access and modification times of a symlink itself.
@@ -385,12 +342,12 @@ func ByteSliceToString(s []byte) string {
 
 // Flock applies or removes an advisory lock on an open file.
 func Flock(fd int, how int) error {
-	return callErr(&libcx_flock, 2, uintptr(fd), uintptr(how), 0, 0, 0, 0)
+	return callErr(extFlock, 2, uintptr(fd), uintptr(how), 0, 0, 0, 0)
 }
 
 // MmapPtr is like Mmap but takes and returns a pointer.
 func MmapPtr(fd int, offset int64, addr unsafe.Pointer, length uintptr, prot int, flags int) (unsafe.Pointer, error) {
-	r, _, e := sysvicall6(uintptr(unsafe.Pointer(&libcx_mmap)), 6, uintptr(addr), length, uintptr(prot), uintptr(flags), uintptr(fd), uintptr(offset))
+	r, _, e := extCall(extMmap, 6, uintptr(addr), length, uintptr(prot), uintptr(flags), uintptr(fd), uintptr(offset))
 	if r == ^uintptr(0) {
 		if e == 0 {
 			e = syscall.EINVAL
@@ -402,7 +359,7 @@ func MmapPtr(fd int, offset int64, addr unsafe.Pointer, length uintptr, prot int
 
 // Getpgid returns the process group ID of pid.
 func Getpgid(pid int) (int, error) {
-	r, _, e := sysvicall6(uintptr(unsafe.Pointer(&libcx_getpgid)), 1, uintptr(pid), 0, 0, 0, 0, 0)
+	r, _, e := extCall(extGetpgid, 1, uintptr(pid), 0, 0, 0, 0, 0)
 	if int(r) == -1 {
 		return -1, e
 	}
@@ -413,21 +370,21 @@ func Getpgid(pid int) (int, error) {
 // pseudo-terminal with posix_openpt/grantpt/unlockpt and returns the master
 // descriptor and the name of the slave (BSD style on Hurd: /dev/ptyXN -> /dev/ttyXN).
 func Openpty(flags int) (master int, slave string, err error) {
-	r, _, e := sysvicall6(uintptr(unsafe.Pointer(&libcx_posix_openpt)), 1, uintptr(flags), 0, 0, 0, 0, 0)
+	r, _, e := extCall(extPosixOpenpt, 1, uintptr(flags), 0, 0, 0, 0, 0)
 	if int(r) == -1 {
 		return -1, "", e
 	}
 	master = int(r)
-	if err := callErr(&libcx_grantpt, 1, uintptr(master), 0, 0, 0, 0, 0); err != nil {
+	if err := callErr(extGrantpt, 1, uintptr(master), 0, 0, 0, 0, 0); err != nil {
 		syscall.Close(master)
 		return -1, "", err
 	}
-	if err := callErr(&libcx_unlockpt, 1, uintptr(master), 0, 0, 0, 0, 0); err != nil {
+	if err := callErr(extUnlockpt, 1, uintptr(master), 0, 0, 0, 0, 0); err != nil {
 		syscall.Close(master)
 		return -1, "", err
 	}
 	var buf [256]byte
-	if rc, _, e := sysvicall6(uintptr(unsafe.Pointer(&libcx_ptsname_r)), 3, uintptr(master), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)), 0, 0, 0); rc != 0 {
+	if rc, _, e := extCall(extPtsnameR, 3, uintptr(master), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)), 0, 0, 0); rc != 0 {
 		syscall.Close(master)
 		if e == 0 {
 			e = syscall.Errno(rc)
