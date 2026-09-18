@@ -393,7 +393,10 @@ func semasleep(ns int64) int32 {
 		if r1 == 0 {
 			break
 		}
-		if err == _EINTR {
+		// relibc's Semaphore::wait propagates futex_wait's EAGAIN (the
+		// count changed between try_wait and sleeping) instead of looping
+		// as Linux's futex-based implementations do; retry it like EINTR.
+		if err == _EINTR || err == _EAGAIN {
 			continue
 		}
 		throw("sem_wait")
