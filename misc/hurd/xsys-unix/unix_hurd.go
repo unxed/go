@@ -70,39 +70,45 @@ func rawSysvicall6(trap, nargs, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uintptr,
 
 type libcFunc uintptr
 
-//go:cgo_import_dynamic libc_tcgetattr tcgetattr "libc.so.0.3"
-//go:cgo_import_dynamic libc_tcsetattr tcsetattr "libc.so.0.3"
-//go:cgo_import_dynamic libc_ioctl ioctl "libc.so.0.3"
-//go:cgo_import_dynamic libc_poll poll "libc.so.0.3"
-//go:cgo_import_dynamic libc_mprotect mprotect "libc.so.0.3"
-//go:cgo_import_dynamic libc_fcntl fcntl "libc.so.0.3"
-//go:cgo_import_dynamic libc_fchmodat fchmodat "libc.so.0.3"
-//go:cgo_import_dynamic libc_utimensat utimensat "libc.so.0.3"
-//go:cgo_import_dynamic libc_uname uname "libc.so.0.3"
-//go:cgo_import_dynamic libc_select select "libc.so.0.3"
+//go:cgo_import_dynamic libcx_tcgetattr tcgetattr "libc.so.0.3"
+//go:cgo_import_dynamic libcx_tcsetattr tcsetattr "libc.so.0.3"
+//go:cgo_import_dynamic libcx_ioctl ioctl "libc.so.0.3"
+//go:cgo_import_dynamic libcx_poll poll "libc.so.0.3"
+//go:cgo_import_dynamic libcx_mprotect mprotect "libc.so.0.3"
+//go:cgo_import_dynamic libcx_fcntl fcntl "libc.so.0.3"
+//go:cgo_import_dynamic libcx_fchmodat fchmodat "libc.so.0.3"
+//go:cgo_import_dynamic libcx_utimensat utimensat "libc.so.0.3"
+//go:cgo_import_dynamic libcx_uname uname "libc.so.0.3"
+//go:cgo_import_dynamic libcx_select select "libc.so.0.3"
+//go:cgo_import_dynamic libcx_flock flock "libc.so.0.3"
+//go:cgo_import_dynamic libcx_mmap mmap "libc.so.0.3"
 
-//go:linkname libc_tcgetattr libc_tcgetattr
-//go:linkname libc_tcsetattr libc_tcsetattr
-//go:linkname libc_ioctl libc_ioctl
-//go:linkname libc_poll libc_poll
-//go:linkname libc_mprotect libc_mprotect
-//go:linkname libc_fcntl libc_fcntl
-//go:linkname libc_fchmodat libc_fchmodat
-//go:linkname libc_utimensat libc_utimensat
-//go:linkname libc_uname libc_uname
-//go:linkname libc_select libc_select
+//go:linkname libcx_tcgetattr libcx_tcgetattr
+//go:linkname libcx_tcsetattr libcx_tcsetattr
+//go:linkname libcx_ioctl libcx_ioctl
+//go:linkname libcx_poll libcx_poll
+//go:linkname libcx_mprotect libcx_mprotect
+//go:linkname libcx_fcntl libcx_fcntl
+//go:linkname libcx_fchmodat libcx_fchmodat
+//go:linkname libcx_utimensat libcx_utimensat
+//go:linkname libcx_uname libcx_uname
+//go:linkname libcx_select libcx_select
+//go:linkname libcx_flock libcx_flock
+//go:linkname libcx_mmap libcx_mmap
 
 var (
-	libc_tcgetattr,
-	libc_tcsetattr,
-	libc_ioctl,
-	libc_poll,
-	libc_mprotect,
-	libc_fcntl,
-	libc_fchmodat,
-	libc_utimensat,
-	libc_uname,
-	libc_select libcFunc
+	libcx_tcgetattr,
+	libcx_tcsetattr,
+	libcx_ioctl,
+	libcx_poll,
+	libcx_mprotect,
+	libcx_fcntl,
+	libcx_fchmodat,
+	libcx_utimensat,
+	libcx_uname,
+	libcx_select,
+	libcx_flock,
+	libcx_mmap libcFunc
 )
 
 func call(fn *libcFunc, n uintptr, a1, a2, a3, a4, a5, a6 uintptr) (uintptr, error) {
@@ -128,7 +134,7 @@ func callErr(fn *libcFunc, n uintptr, a1, a2, a3, a4, a5, a6 uintptr) error {
 
 func IoctlGetTermios(fd int, req uint) (*Termios, error) {
 	var t Termios
-	if err := callErr(&libc_tcgetattr, 2, uintptr(fd), uintptr(unsafe.Pointer(&t)), 0, 0, 0, 0); err != nil {
+	if err := callErr(&libcx_tcgetattr, 2, uintptr(fd), uintptr(unsafe.Pointer(&t)), 0, 0, 0, 0); err != nil {
 		return nil, err
 	}
 	return &t, nil
@@ -142,24 +148,24 @@ func IoctlSetTermios(fd int, req uint, value *Termios) error {
 	case TCSETSF:
 		how = tcsaFlush
 	}
-	return callErr(&libc_tcsetattr, 3, uintptr(fd), how, uintptr(unsafe.Pointer(value)), 0, 0, 0)
+	return callErr(&libcx_tcsetattr, 3, uintptr(fd), how, uintptr(unsafe.Pointer(value)), 0, 0, 0)
 }
 
 func IoctlGetWinsize(fd int, req uint) (*Winsize, error) {
 	var ws Winsize
-	if err := callErr(&libc_ioctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(&ws)), 0, 0, 0); err != nil {
+	if err := callErr(&libcx_ioctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(&ws)), 0, 0, 0); err != nil {
 		return nil, err
 	}
 	return &ws, nil
 }
 
 func IoctlSetWinsize(fd int, req uint, value *Winsize) error {
-	return callErr(&libc_ioctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(value)), 0, 0, 0)
+	return callErr(&libcx_ioctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(value)), 0, 0, 0)
 }
 
 func IoctlGetInt(fd int, req uint) (int, error) {
 	var v int32
-	if err := callErr(&libc_ioctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(&v)), 0, 0, 0); err != nil {
+	if err := callErr(&libcx_ioctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(&v)), 0, 0, 0); err != nil {
 		return 0, err
 	}
 	return int(v), nil
@@ -167,7 +173,7 @@ func IoctlGetInt(fd int, req uint) (int, error) {
 
 func IoctlSetInt(fd int, req uint, value int) error {
 	v := int32(value)
-	return callErr(&libc_ioctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(&v)), 0, 0, 0)
+	return callErr(&libcx_ioctl, 3, uintptr(fd), uintptr(req), uintptr(unsafe.Pointer(&v)), 0, 0, 0)
 }
 
 // Poll.
@@ -177,7 +183,7 @@ func Poll(fds []PollFd, timeout int) (int, error) {
 	if len(fds) > 0 {
 		p = unsafe.Pointer(&fds[0])
 	}
-	r, _, e := sysvicall6(uintptr(unsafe.Pointer(&libc_poll)), 3, uintptr(p), uintptr(len(fds)), uintptr(timeout), 0, 0, 0)
+	r, _, e := sysvicall6(uintptr(unsafe.Pointer(&libcx_poll)), 3, uintptr(p), uintptr(len(fds)), uintptr(timeout), 0, 0, 0)
 	if int(r) == -1 {
 		return -1, e
 	}
@@ -198,7 +204,7 @@ func Mprotect(b []byte, prot int) error {
 	if len(b) == 0 {
 		return nil
 	}
-	return callErr(&libc_mprotect, 3, uintptr(unsafe.Pointer(&b[0])), uintptr(len(b)), uintptr(prot), 0, 0, 0)
+	return callErr(&libcx_mprotect, 3, uintptr(unsafe.Pointer(&b[0])), uintptr(len(b)), uintptr(prot), 0, 0, 0)
 }
 
 // Files.
@@ -264,7 +270,7 @@ func SetsockoptInt(fd, level, opt int, value int) error { return syscall.Setsock
 func GetsockoptInt(fd, level, opt int) (int, error)     { return syscall.GetsockoptInt(fd, level, opt) }
 
 func Fcntl(fd int, cmd int, arg uintptr) (int, error) {
-	r, _, e := sysvicall6(uintptr(unsafe.Pointer(&libc_fcntl)), 3, uintptr(fd), uintptr(cmd), arg, 0, 0, 0)
+	r, _, e := sysvicall6(uintptr(unsafe.Pointer(&libcx_fcntl)), 3, uintptr(fd), uintptr(cmd), arg, 0, 0, 0)
 	if int(r) == -1 {
 		return -1, e
 	}
@@ -280,7 +286,7 @@ func Fchmodat(dirfd int, path string, mode uint32, flags int) error {
 	if err != nil {
 		return err
 	}
-	return callErr(&libc_fchmodat, 4, uintptr(dirfd), uintptr(unsafe.Pointer(p)), uintptr(mode), uintptr(flags), 0, 0)
+	return callErr(&libcx_fchmodat, 4, uintptr(dirfd), uintptr(unsafe.Pointer(p)), uintptr(mode), uintptr(flags), 0, 0)
 }
 
 func UtimesNanoAt(dirfd int, path string, ts []Timespec, flags int) error {
@@ -291,7 +297,7 @@ func UtimesNanoAt(dirfd int, path string, ts []Timespec, flags int) error {
 	if err != nil {
 		return err
 	}
-	return callErr(&libc_utimensat, 4, uintptr(dirfd), uintptr(unsafe.Pointer(p)), uintptr(unsafe.Pointer(&ts[0])), uintptr(flags), 0, 0)
+	return callErr(&libcx_utimensat, 4, uintptr(dirfd), uintptr(unsafe.Pointer(p)), uintptr(unsafe.Pointer(&ts[0])), uintptr(flags), 0, 0)
 }
 
 // Lutimes sets the access and modification times of a symlink itself.
@@ -320,11 +326,53 @@ func Mkdev(major, minor uint32) uint64 {
 	return ((maj &^ 0xfff) << 32) | ((maj & 0xfff) << 8) | ((min &^ 0xff) << 12) | (min & 0xff)
 }
 
-// Utsname is struct utsname with fixed-size fields as in glibc.
+// Utsname mirrors the fields f4 reads. The real struct utsname layout has not been
+// measured on Hurd yet, so Uname below does not call libc.
 type Utsname struct {
-	Sysname    [1024]byte
-	Nodename   [1024]byte
-	Release    [1024]byte
-	Version    [1024]byte
-	Machine    [1024]byte
+	Sysname  [256]byte
+	Nodename [256]byte
+	Release  [256]byte
+	Version  [256]byte
+	Machine  [256]byte
+}
+
+// Uname fills u with what can be known without libc's uname(): the system is GNU
+// (Hurd) on x86_64; the node name comes from gethostname.
+func Uname(u *Utsname) error {
+	*u = Utsname{}
+	copy(u.Sysname[:], "GNU")
+	copy(u.Machine[:], "x86_64")
+	if h, err := syscall.Gethostname(); err == nil {
+		copy(u.Nodename[:], h)
+	}
+	return nil
+}
+
+// ByteSliceToString returns a string form of the text represented by the bytes in
+// s, up to the first NUL.
+func ByteSliceToString(s []byte) string {
+	for i, v := range s {
+		if v == 0 {
+			s = s[:i]
+			break
+		}
+	}
+	return string(s)
+}
+
+// Flock applies or removes an advisory lock on an open file.
+func Flock(fd int, how int) error {
+	return callErr(&libcx_flock, 2, uintptr(fd), uintptr(how), 0, 0, 0, 0)
+}
+
+// MmapPtr is like Mmap but takes and returns a pointer.
+func MmapPtr(fd int, offset int64, addr unsafe.Pointer, length uintptr, prot int, flags int) (unsafe.Pointer, error) {
+	r, _, e := sysvicall6(uintptr(unsafe.Pointer(&libcx_mmap)), 6, uintptr(addr), length, uintptr(prot), uintptr(flags), uintptr(fd), uintptr(offset))
+	if r == ^uintptr(0) {
+		if e == 0 {
+			e = syscall.EINVAL
+		}
+		return nil, e
+	}
+	return unsafe.Pointer(r), nil
 }
