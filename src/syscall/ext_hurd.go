@@ -71,28 +71,46 @@ const (
 	extPtsnameR
 )
 
-var extFns = [...]*libcFunc{
-	extTcgetattr:   &libc_Tcgetattr,
-	extTcsetattr:   &libc_Tcsetattr,
-	extIoctl:       &libc_Ioctl,
-	extPoll:        &libc_Poll,
-	extMprotect:    &libc_Mprotect,
-	extFcntl:       &libc_Fcntl,
-	extFchmodat:    &libc_Fchmodat,
-	extUtimensat:   &libc_Utimensat,
-	extFlock:       &libc_Flock,
-	extMmap:        &libc_Mmap,
-	extGetpgid:     &libc_Getpgid,
-	extPosixOpenpt: &libc_PosixOpenpt,
-	extGrantpt:     &libc_Grantpt,
-	extUnlockpt:    &libc_Unlockpt,
-	extPtsnameR:    &libc_PtsnameR,
-}
-
 // extCall calls the libc function selected by idx (an ext* constant) and
 // returns its raw results and errno. Pushed to golang.org/x/sys/unix.
 //
+// The address of a dynamic import can only be taken in code (a data table of
+// them would need data relocations against SDYNIMPORT symbols, which the
+// linker does not support), hence the switch.
+//
 //go:linkname extCall
 func extCall(idx, nargs, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uintptr, err Errno) {
-	return sysvicall6(uintptr(unsafe.Pointer(extFns[idx])), nargs, a1, a2, a3, a4, a5, a6)
+	switch idx {
+	case extTcgetattr:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_Tcgetattr)), nargs, a1, a2, a3, a4, a5, a6)
+	case extTcsetattr:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_Tcsetattr)), nargs, a1, a2, a3, a4, a5, a6)
+	case extIoctl:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_Ioctl)), nargs, a1, a2, a3, a4, a5, a6)
+	case extPoll:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_Poll)), nargs, a1, a2, a3, a4, a5, a6)
+	case extMprotect:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_Mprotect)), nargs, a1, a2, a3, a4, a5, a6)
+	case extFcntl:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_Fcntl)), nargs, a1, a2, a3, a4, a5, a6)
+	case extFchmodat:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_Fchmodat)), nargs, a1, a2, a3, a4, a5, a6)
+	case extUtimensat:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_Utimensat)), nargs, a1, a2, a3, a4, a5, a6)
+	case extFlock:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_Flock)), nargs, a1, a2, a3, a4, a5, a6)
+	case extMmap:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_Mmap)), nargs, a1, a2, a3, a4, a5, a6)
+	case extGetpgid:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_Getpgid)), nargs, a1, a2, a3, a4, a5, a6)
+	case extPosixOpenpt:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_PosixOpenpt)), nargs, a1, a2, a3, a4, a5, a6)
+	case extGrantpt:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_Grantpt)), nargs, a1, a2, a3, a4, a5, a6)
+	case extUnlockpt:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_Unlockpt)), nargs, a1, a2, a3, a4, a5, a6)
+	case extPtsnameR:
+		return sysvicall6(uintptr(unsafe.Pointer(&libc_PtsnameR)), nargs, a1, a2, a3, a4, a5, a6)
+	}
+	return 0, 0, ENOSYS
 }
