@@ -104,6 +104,11 @@ const (
 // registers, so this does not depend on glibc's exact frame layout; if it cannot
 // be found the process dies loudly instead of re-faulting forever.
 //
+// hurdSigDebug (temporary): log the first register-changing signals.
+const hurdSigDebug = true
+
+var hurdSigCount uint32
+
 //go:nosplit
 //go:nowritebarrierrec
 func sighandlerhurd(sig uint32, info *siginfo, ctx unsafe.Pointer, gp *g) {
@@ -117,6 +122,12 @@ func sighandlerhurd(sig uint32, info *siginfo, ctx unsafe.Pointer, gp *g) {
 	for a := uintptr(ctx) - _NGREGS_MIRROR*8; a >= uintptr(ctx)-_SC_SEARCH_MAX; a -= 8 {
 		sc := (*[_NGREGS_MIRROR]uint64)(unsafe.Pointer(a))
 		if *sc == *want {
+			if hurdSigDebug && hurdSigCount < 16 {
+				hurdSigCount++
+				println("sighandlerhurd sig=", sig, " ctx-sc=", uintptr(ctx)-a, " rip ", hex(orig[_REG_RIP]), "->", hex(mc.gregs[_REG_RIP]),
+					" rsp ", hex(orig[_REG_RSP]), "->", hex(mc.gregs[_REG_RSP]), " rax ", hex(orig[_REG_RAX]), "->", hex(mc.gregs[_REG_RAX]),
+					" rfl ", hex(orig[_REG_RFL]), "->", hex(mc.gregs[_REG_RFL]), " cs ", hex(orig[_REG_CS]), "->", hex(mc.gregs[_REG_CS]))
+			}
 			*sc = *(*[_NGREGS_MIRROR]uint64)(unsafe.Pointer(&mc.gregs))
 			return
 		}
