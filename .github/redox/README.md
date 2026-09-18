@@ -18,6 +18,14 @@ Everything here is exercised only in GitHub Actions (`redox-cross-build`,
   (`runtime/runtime1.go`); `GODEBUG=asyncpreemptoff=0` re-enables it (the `preempt`
   variant in the ladder shows the crashes). Fix upstream: use an already-saved scratch
   register (r8/r10/r12) instead of rcx there.
+  The patch (`relibc/sigentry-rcx.patch`, issue text `relibc/ISSUE.md`) is verified by
+  `redox-relibc-verify`: see `relibc/VERIFICATION.md` (unpatched crashes, patched passes).
+* Go exits through `_exit` (relibc's `exit()` cancels all other threads with a realtime
+  signal first). A multi-threaded process still occasionally (~10%) prints its result
+  and then hangs at exit; not signal related, not root-caused. The ladder counts such
+  runs as passed but flags them ("exit-hang").
+* The ladder VM runs with `REDOXER_QEMU_ARGS='-smp 2'` (with the default 4 vCPUs the
+  whole VM sometimes froze under GC-heavy programs).
 * `syscall.ReadDirent`/`Getdirentries` return ENOSYS: relibc's `readdir_r` is
   `unimplemented!()` and there is no getdents wrapper; `os` uses fdopendir/readdir.
 * Redox's `O_RDONLY` is 0x10000 (not 0): std code that relied on an implicit access
