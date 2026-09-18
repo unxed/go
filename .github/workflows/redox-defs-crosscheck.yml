@@ -46,6 +46,7 @@ jobs:
 
       - name: Cross-check hand-derived definitions against relibc headers
         run: |
+          set -o pipefail
           export CC=/usr/local/bin/redox-cc
           python3 .github/redox/defs_crosscheck.py 2>&1 | tee /tmp/crosscheck.log
 

@@ -170,23 +170,14 @@ func getPageSize() uintptr {
 }
 
 func osinit() {
-	// DEBUG: bisecting an early unhandled-INT3 (runtime.abort) crash that
-	// happens before any output at all reaches the console under redoxer
-	// -- narrowing down which of these steps it survives. Same technique
-	// golang-1.26-hurd used for its own early-abort debugging; remove once
-	// the crash is found.
-	println("DEBUG osinit: start")
 	// Call miniterrno so that we can safely make system calls
 	// before calling minit on m0.
 	asmcgocall(unsafe.Pointer(abi.FuncPCABI0(miniterrno)), unsafe.Pointer(&libc__errnop))
-	println("DEBUG osinit: after miniterrno")
 
 	numCPUStartup = getCPUCount()
-	println("DEBUG osinit: numCPUStartup=", numCPUStartup)
 	if physPageSize == 0 {
 		physPageSize = getPageSize()
 	}
-	println("DEBUG osinit: done, physPageSize=", physPageSize)
 }
 
 func tstart_sysvicall(newm *m) uint32
@@ -212,13 +203,11 @@ func newosproc(mp *m) {
 
 	// Disable signals during create, so that the new thread starts
 	// with signals disabled. It will enable them in minit.
-	println("DEBUG newosproc: before sigprocmask+pthread_create")
 	sigprocmask(_SIG_SETMASK, &sigset_all, &oset)
 	ret = retryOnEAGAIN(func() int32 {
 		return pthread_create(&tid, &attr, abi.FuncPCABI0(tstart_sysvicall), unsafe.Pointer(mp))
 	})
 	sigprocmask(_SIG_SETMASK, &oset, nil)
-	println("DEBUG newosproc: after pthread_create, ret=", ret)
 	if ret != 0 {
 		print("runtime: failed to create new OS thread (have ", mcount(), " already; errno=", ret, ")\n")
 		if ret == -_EAGAIN {
@@ -263,15 +252,11 @@ func miniterrno()
 // Called to initialize a new m (including the bootstrap m).
 // Called on the new thread, cannot allocate memory.
 func minit() {
-	println("DEBUG minit: start")
 	asmcgocall(unsafe.Pointer(abi.FuncPCABI0(miniterrno)), unsafe.Pointer(&libc__errnop))
-	println("DEBUG minit: after miniterrno")
 
 	minitSignals()
-	println("DEBUG minit: after minitSignals")
 
 	getg().m.procid = uint64(pthread_self())
-	println("DEBUG minit: done")
 }
 
 // Called from dropm to undo the effect of an minit.
