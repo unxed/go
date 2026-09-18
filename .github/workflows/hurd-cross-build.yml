@@ -50,6 +50,40 @@ jobs:
           GOOS=hurd GOARCH=amd64 CGO_ENABLED=1 go build -x -o hurdhello.bin . 2>&1 | tee /tmp/build.log
           echo "BUILD_RC=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
 
+      - name: Compile-check phase-2 packages (no link)
+        if: always()
+        run: |
+          export GOROOT=$(pwd)
+          export PATH=$GOROOT/bin:$PATH
+          export GOTOOLCHAIN=local GOFLAGS=-mod=mod
+          : > /tmp/pkgcheck.log
+          FAIL=0
+          for p in syscall internal/syscall/unix internal/poll os fmt time sync; do
+            echo "=== $p" | tee -a /tmp/pkgcheck.log
+            GOOS=hurd GOARCH=amd64 CGO_ENABLED=1 go build -gcflags=-e $p > /tmp/pkg.out 2>&1 || FAIL=1
+            head -100 /tmp/pkg.out | tee -a /tmp/pkgcheck.log
+          done
+          echo "PKGCHECK_FAIL=$FAIL" >> "$GITHUB_ENV"
+          echo "=== std (informational)" | tee -a /tmp/pkgcheck.log
+          GOOS=hurd GOARCH=amd64 CGO_ENABLED=0 go build -gcflags=-e std > /tmp/std.log 2>&1 || true
+          grep -c '^#' /tmp/std.log | sed 's/^/std packages with errors: /' | tee -a /tmp/pkgcheck.log
+          gofmt -l src/syscall src/os src/internal/syscall/unix src/internal/poll src/runtime 2>&1 | grep -i hurd | sed 's/^/gofmt: /' | tee -a /tmp/pkgcheck.log || true
+
+      - name: Build Go test programs for Hurd
+        if: always()
+        run: |
+          export GOROOT=$(pwd)
+          export PATH=$GOROOT/bin:$PATH
+          export GOTOOLCHAIN=local
+          mkdir -p /tmp/gotests/out
+          cd misc/hurd/tests
+          for t in t_os t_fmt t_fs t_rt; do
+            GOOS=hurd GOARCH=amd64 CGO_ENABLED=1 go build -o /tmp/gotests/out/$t.bin ./$t > /tmp/gotests/out/$t.build.log 2>&1
+            echo "$t: build rc=$?"
+            head -40 /tmp/gotests/out/$t.build.log
+          done
+          ls -l /tmp/gotests/out
+
       - name: Show result
         if: always()
         run: |
@@ -65,4 +99,7 @@ jobs:
           path: |
             /tmp/build.log
             /tmp/hurdhello/hurdhello.bin
+            /tmp/pkgcheck.log
+            /tmp/std.log
+            /tmp/gotests/out
           if-no-files-found: warn

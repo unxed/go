@@ -112,6 +112,10 @@ func (e Errno) Error() string {
 	if runtime.GOOS == "haiku" {
 		n = n & 0x7fffffff + 1
 	}
+	if runtime.GOOS == "hurd" && n>>16 == 0x4000 {
+		// POSIX errno on Hurd are Mach error codes (0x40000000 | errno).
+		n &= 0xffff
+	}
 	if 0 <= n && n < len(errors) {
 		s := errors[n]
 		if s != "" {
