@@ -10,6 +10,7 @@ import (
 	"context"
 	"internal/poll"
 	"os"
+	"runtime"
 	"syscall"
 )
 
@@ -136,11 +137,12 @@ func (fd *netFD) dial(ctx context.Context, laddr, raddr sockaddr, ctrlCtxFn func
 	// 1) the one returned by the connect method, if any; or
 	// 2) the one from Getpeername, if it succeeds; or
 	// 3) the one passed to us as the raddr parameter.
+	knownRsa := rsa
 	lsa, _ = syscall.Getsockname(fd.pfd.Sysfd)
 	if crsa != nil {
 		fd.setAddr(fd.addrFunc()(lsa), fd.addrFunc()(crsa))
 	} else if rsa, _ = syscall.Getpeername(fd.pfd.Sysfd); rsa != nil {
-		fd.setAddr(fd.addrFunc()(lsa), fd.addrFunc()(rsa))
+		fd.setAddr(fd.addrFunc()(lsa), fd.addrFunc()(fixEmptyUnixName(rsa, knownRsa)))
 	} else {
 		fd.setAddr(fd.addrFunc()(lsa), raddr)
 	}
@@ -173,8 +175,9 @@ func (fd *netFD) listenStream(ctx context.Context, laddr sockaddr, backlog int, 
 	if err = fd.init(); err != nil {
 		return err
 	}
+	bound := lsa
 	lsa, _ = syscall.Getsockname(fd.pfd.Sysfd)
-	fd.setAddr(fd.addrFunc()(lsa), nil)
+	fd.setAddr(fd.addrFunc()(fixEmptyUnixName(lsa, bound)), nil)
 	return nil
 }
 
@@ -220,7 +223,23 @@ func (fd *netFD) listenDatagram(ctx context.Context, laddr sockaddr, ctrlCtxFn f
 	if err = fd.init(); err != nil {
 		return err
 	}
+	bound := lsa
 	lsa, _ = syscall.Getsockname(fd.pfd.Sysfd)
-	fd.setAddr(fd.addrFunc()(lsa), nil)
+	fd.setAddr(fd.addrFunc()(fixEmptyUnixName(lsa, bound)), nil)
 	return nil
+}
+
+// fixEmptyUnixName returns known instead of got when got is an unnamed AF_UNIX
+// address and known has a name. On Hurd, pflocal does not report the name of a
+// bound or connected AF_UNIX socket in getsockname/getpeername.
+func fixEmptyUnixName(got, known syscall.Sockaddr) syscall.Sockaddr {
+	if runtime.GOOS != "hurd" {
+		return got
+	}
+	if gu, ok := got.(*syscall.SockaddrUnix); ok && gu.Name == "" {
+		if ku, ok := known.(*syscall.SockaddrUnix); ok && ku.Name != "" {
+			return ku
+		}
+	}
+	return got
 }
