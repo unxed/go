@@ -145,7 +145,7 @@ jobs:
             mkdir -p /tmp/pkgt/out/data/$n
             if GOOS=redox GOARCH=amd64 CGO_ENABLED=0 go test -c -o /tmp/pkgt/out/$n.test $p > /tmp/pkgt/test-build-$n.log 2>&1; then
               echo "$n TESTBUILD_OK"
-              [ -d src/$p/testdata ] && cp -r src/$p/testdata /tmp/pkgt/out/data/$n/
+              touch /tmp/pkgt/out/data/$n/.keep; [ -d src/$p/testdata ] && cp -r src/$p/testdata /tmp/pkgt/out/data/$n/
               chmod +x /tmp/pkgt/out/$n.test
             else
               echo "$n TESTBUILD_FAIL"; head -40 /tmp/pkgt/test-build-$n.log

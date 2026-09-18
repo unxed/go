@@ -326,9 +326,6 @@ func main() {
 		racefini() // does not return
 	}
 
-	if GOOS == "redox" {
-		dbgmsg("DBG runtime.main: main returned, calling exit(0)\n") // TEMPORARY
-	}
 	exit(0)
 	for {
 		var x *int32

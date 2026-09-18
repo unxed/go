@@ -12,14 +12,16 @@ run_test() {
   t=0; fin=0
   while [ ! -f /tmp/rc.done ] && [ $t -lt $limit ]; do
     sleep 1; t=$((t+1))
-    # the run has printed its verdict: allow a few seconds for the process to exit
-    if [ $fin -eq 0 ] && grep '^PASS' /tmp/$n.out >/dev/null 2>&1; then fin=$t; fi
-    if [ $fin -eq 0 ] && grep '^FAIL' /tmp/$n.out >/dev/null 2>&1; then fin=$t; fi
+    [ $((t % 15)) -eq 0 ] && echo "... $n still running after ${t}s"
+    # the run has printed its verdict (last line PASS/FAIL): give the process a few seconds to exit
+    last=`tail -1 /tmp/$n.out`
+    if [ $fin -eq 0 ] && { [ "$last" = "PASS" ] || [ "$last" = "FAIL" ]; }; then fin=$t; fi
     if [ $fin -gt 0 ] && [ $t -ge $((fin+4)) ]; then break; fi
   done
   if [ -f /tmp/rc.done ]; then rc=`cat /tmp/rc.done`; else rc=noexit; fi
+  [ "$rc" = noexit ] && echo "(process did not exit: exit hang)"
   echo "--- top-level results of $n"
-  grep '^--- ' /tmp/$n.out
+  grep -- '--- ' /tmp/$n.out
   echo "--- failures (any level) of $n"
   grep -- '--- FAIL' /tmp/$n.out
   echo "--- tail of $n"
