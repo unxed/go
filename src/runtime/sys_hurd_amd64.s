@@ -132,16 +132,16 @@ TEXT runtime·sigtramp(SB),NOSPLIT|TOPFRAME,$0
 	// Note that we are executing on altsigstack here, so we have
 	// more stack available than NOSPLIT would have us believe.
 	// To defeat the linker, we make our own stack frame with
-	// more space (five outgoing argument words, then saved state):
-	SUBQ    $200, SP
+	// more space:
+	SUBQ    $184, SP
 
 	// save registers
-	MOVQ    BX, 48(SP)
-	MOVQ    BP, 56(SP)
-	MOVQ	R12, 64(SP)
-	MOVQ	R13, 72(SP)
-	MOVQ	R14, 80(SP)
-	MOVQ	R15, 88(SP)
+	MOVQ    BX, 32(SP)
+	MOVQ    BP, 40(SP)
+	MOVQ	R12, 48(SP)
+	MOVQ	R13, 56(SP)
+	MOVQ	R14, 64(SP)
+	MOVQ	R15, 72(SP)
 
 	get_tls(BX)
 	// check that g exists
@@ -155,7 +155,7 @@ TEXT runtime·sigtramp(SB),NOSPLIT|TOPFRAME,$0
 
 allgood:
 	// save g
-	MOVQ	R10, 96(SP)
+	MOVQ	R10, 80(SP)
 
 	// Save m->libcall and m->scratch. We need to do this because we
 	// might get interrupted by a signal in runtime·asmcgocall.
@@ -164,35 +164,35 @@ allgood:
 	MOVQ	g_m(R10), BP
 	LEAQ	(m_mOS+mOS_libcall)(BP), R11
 	MOVQ	libcall_fn(R11), R10
-	MOVQ	R10, 104(SP)
+	MOVQ	R10, 88(SP)
 	MOVQ	libcall_args(R11), R10
-	MOVQ	R10, 112(SP)
+	MOVQ	R10, 96(SP)
 	MOVQ	libcall_n(R11), R10
-	MOVQ	R10, 120(SP)
+	MOVQ	R10, 104(SP)
 	MOVQ    libcall_r1(R11), R10
-	MOVQ    R10, 184(SP)
+	MOVQ    R10, 168(SP)
 	MOVQ    libcall_r2(R11), R10
-	MOVQ    R10, 192(SP)
+	MOVQ    R10, 176(SP)
 
 	// save m->scratch
 	LEAQ	(m_mOS+mOS_scratch)(BP), R11
 	MOVQ	0(R11), R10
-	MOVQ	R10, 128(SP)
+	MOVQ	R10, 112(SP)
 	MOVQ	8(R11), R10
-	MOVQ	R10, 136(SP)
+	MOVQ	R10, 120(SP)
 	MOVQ	16(R11), R10
-	MOVQ	R10, 144(SP)
+	MOVQ	R10, 128(SP)
 	MOVQ	24(R11), R10
-	MOVQ	R10, 152(SP)
+	MOVQ	R10, 136(SP)
 	MOVQ	32(R11), R10
-	MOVQ	R10, 160(SP)
+	MOVQ	R10, 144(SP)
 	MOVQ	40(R11), R10
-	MOVQ	R10, 168(SP)
+	MOVQ	R10, 152(SP)
 
 	// save errno, it might be EINTR; stuff we do here might reset it.
 	MOVQ	(m_mOS+mOS_perrno)(BP), R10
 	MOVL	0(R10), R10
-	MOVQ	R10, 176(SP)
+	MOVQ	R10, 160(SP)
 
 	MOVQ	g(BX), R10
 	// g = m->gsignal
@@ -206,12 +206,6 @@ allgood:
 	MOVQ	SI, 8(SP)
 	MOVQ	DX, 16(SP)
 	MOVQ	R10, 24(SP)
-	// glibc's Hurd trampoline calls us with, above the return address (at
-	// 200(SP)): sigreturn_addr, sigreturn_returns_here, return_scp. __sigreturn
-	// restores registers from that struct sigcontext, not from the ucontext_t we
-	// are given (a copy), so pass it on: see sighandlerhurd.
-	MOVQ	224(SP), R11
-	MOVQ	R11, 32(SP)
 	CALL	runtime·sighandlerhurd(SB)
 
 	get_tls(BX)
@@ -219,51 +213,51 @@ allgood:
 	MOVQ	g_m(BP), BP
 	// restore libcall
 	LEAQ	(m_mOS+mOS_libcall)(BP), R11
-	MOVQ	104(SP), R10
+	MOVQ	88(SP), R10
 	MOVQ	R10, libcall_fn(R11)
-	MOVQ	112(SP), R10
+	MOVQ	96(SP), R10
 	MOVQ	R10, libcall_args(R11)
-	MOVQ	120(SP), R10
+	MOVQ	104(SP), R10
 	MOVQ	R10, libcall_n(R11)
-	MOVQ    184(SP), R10
+	MOVQ    168(SP), R10
 	MOVQ    R10, libcall_r1(R11)
-	MOVQ    192(SP), R10
+	MOVQ    176(SP), R10
 	MOVQ    R10, libcall_r2(R11)
 
 	// restore scratch
 	LEAQ	(m_mOS+mOS_scratch)(BP), R11
-	MOVQ	128(SP), R10
+	MOVQ	112(SP), R10
 	MOVQ	R10, 0(R11)
-	MOVQ	136(SP), R10
+	MOVQ	120(SP), R10
 	MOVQ	R10, 8(R11)
-	MOVQ	144(SP), R10
+	MOVQ	128(SP), R10
 	MOVQ	R10, 16(R11)
-	MOVQ	152(SP), R10
+	MOVQ	136(SP), R10
 	MOVQ	R10, 24(R11)
-	MOVQ	160(SP), R10
+	MOVQ	144(SP), R10
 	MOVQ	R10, 32(R11)
-	MOVQ	168(SP), R10
+	MOVQ	152(SP), R10
 	MOVQ	R10, 40(R11)
 
 	// restore errno
 	MOVQ	(m_mOS+mOS_perrno)(BP), R11
-	MOVQ	176(SP), R10
+	MOVQ	160(SP), R10
 	MOVL	R10, 0(R11)
 
 	// restore g
-	MOVQ	96(SP), R10
+	MOVQ	80(SP), R10
 	MOVQ	R10, g(BX)
 
 exit:
 	// restore registers
-	MOVQ	48(SP), BX
-	MOVQ	56(SP), BP
-	MOVQ	64(SP), R12
-	MOVQ	72(SP), R13
-	MOVQ	80(SP), R14
-	MOVQ	88(SP), R15
+	MOVQ	32(SP), BX
+	MOVQ	40(SP), BP
+	MOVQ	48(SP), R12
+	MOVQ	56(SP), R13
+	MOVQ	64(SP), R14
+	MOVQ	72(SP), R15
 
-	ADDQ    $200, SP
+	ADDQ    $184, SP
 	RET
 
 

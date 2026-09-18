@@ -88,46 +88,39 @@ func (c *sigctxt) set_sigaddr(x uint64) { c.info.si_addr = uintptr(x) }
 
 // The ucontext_t glibc passes to an SA_SIGINFO handler is a copy made by
 // fill_ucontext(); __sigreturn() restores the thread from the struct sigcontext
-// in the same stack frame, so changes a handler makes to the ucontext (Go's
-// async preemption and sigpanic injection rewrite RIP/RSP) are lost unless they
-// are written back. gregs[REG_R8..REG_RFL] mirror the sigcontext from sc_r8
-// on. Both numbers were measured on real Hurd (unxed/debian-hurd poc/ctx_poc.c).
+// that sits in the same stack frame, below the ucontext_t. Changes a handler
+// makes to the ucontext (Go's async preemption and sigpanic injection rewrite
+// RIP/RSP) are therefore lost unless they are written back into the sigcontext.
+// gregs[REG_R8..REG_RFL] mirror the sigcontext from sc_r8 on (measured on real
+// Hurd, unxed/debian-hurd poc/ctx_poc.c: the mirror is 384-32 bytes below the
+// ucontext_t).
 const (
-	_SC_R8_OFFSET  = 32
-	_NGREGS_MIRROR = 19
+	_NGREGS_MIRROR = 19 // R8 .. RFL
+	_SC_SEARCH_MAX = 2048
 )
 
 // sighandlerhurd runs sighandler and then propagates register changes to the
-// sigcontext scp (see sys_hurd_amd64.s: sigtramp). It first checks that the
-// sigcontext still mirrors the registers we were handed, so an unexpected
-// layout degrades to "changes ignored" instead of corrupting the frame.
+// sigcontext. The sigcontext register block is found by matching the original
+// registers, so this does not depend on glibc's exact frame layout; if it cannot
+// be found the process dies loudly instead of re-faulting forever.
 //
-// hurdSigDebug (temporary) logs the first few signals with the register changes
-// and the write-back decision.
-const hurdSigDebug = true
-
-var hurdSigCount uint32
-
 //go:nosplit
 //go:nowritebarrierrec
-func sighandlerhurd(sig uint32, info *siginfo, ctx unsafe.Pointer, gp *g, scp unsafe.Pointer) {
+func sighandlerhurd(sig uint32, info *siginfo, ctx unsafe.Pointer, gp *g) {
 	mc := &(*ucontext)(ctx).uc_mcontext
 	orig := mc.gregs
 	sighandler(sig, info, ctx, gp)
-	changed := mc.gregs != orig
-	matched := false
-	if scp != nil && changed {
-		sc := (*[_NGREGS_MIRROR]uint64)(add(scp, _SC_R8_OFFSET))
-		if *sc == *(*[_NGREGS_MIRROR]uint64)(unsafe.Pointer(&orig)) {
-			matched = true
+	if mc.gregs == orig {
+		return
+	}
+	want := (*[_NGREGS_MIRROR]uint64)(unsafe.Pointer(&orig))
+	for a := uintptr(ctx) - _NGREGS_MIRROR*8; a >= uintptr(ctx)-_SC_SEARCH_MAX; a -= 8 {
+		sc := (*[_NGREGS_MIRROR]uint64)(unsafe.Pointer(a))
+		if *sc == *want {
 			*sc = *(*[_NGREGS_MIRROR]uint64)(unsafe.Pointer(&mc.gregs))
+			return
 		}
 	}
-	if hurdSigDebug && sig != _SIGURG && hurdSigCount < 12 {
-		hurdSigCount++
-		println("sighandlerhurd sig=", sig, " changed=", changed, " matched=", matched,
-			" rip ", hex(orig[_REG_RIP]), "->", hex(mc.gregs[_REG_RIP]),
-			" rsp ", hex(orig[_REG_RSP]), "->", hex(mc.gregs[_REG_RSP]),
-			" scp=", scp, " sigcode=", info.si_code, " addr=", hex(info.si_addr))
-	}
+	println("sighandlerhurd: sig", sig, "changed registers but the sigcontext was not found")
+	throw("sighandlerhurd: cannot propagate register changes")
 }
