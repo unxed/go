@@ -16,7 +16,6 @@ run_one /root/mnt/p10_stdlib.bin default 1
 run_one /root/mnt/p11_time_rand.bin default 1
 run_one /root/mnt/p12_stdin.bin stdin 1
 run_one /root/mnt/p13_signal.bin default 1
-run_one /root/mnt/p14_exec.bin default 1
 run_one /root/mnt/x15_net.bin default 1
 run_one /root/mnt/x10_sigstorm.bin default 1
 run_one /root/mnt/x10_sigstorm.bin preempt 1
@@ -24,4 +23,7 @@ run_one /root/mnt/x10_sigstorm.bin preempt 1
 run_one /root/mnt/p04_gc.bin default 1
 run_one /root/mnt/p09_stack.bin default 1
 run_one /root/mnt/p08_memzero.bin default 1
+# fork/exec last: they can freeze the whole VM, so nothing else may come after them
+run_one /root/mnt/x18_fork_c.bin default 1
+run_one /root/mnt/p14_exec.bin default 1
 echo "=== LADDER DONE"

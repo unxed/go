@@ -21,7 +21,9 @@ func main() {
 			fmt.Printf("FAIL "+f+"\n", a...)
 		}
 	}
+	stage := func(s string) { fmt.Println("stage:", s) }
 
+	stage("self re-exec")
 	// self re-exec: exit status + captured stdout, no dependency on the guest's userland
 	self := os.Args[0]
 	out, err := exec.Command(self, "child", "a", "b").Output()
@@ -29,10 +31,12 @@ func main() {
 	check(isExit && ee.ExitCode() == 7, "self exec exit code: %v", err)
 	check(strings.TrimSpace(string(out)) == "child says hi, args: a,b", "self exec output %q", out)
 
+	stage("sh -c")
 	// guest shell
 	out, err = exec.Command("sh", "-c", "echo from-sh; exit 0").CombinedOutput()
 	check(err == nil && strings.TrimSpace(string(out)) == "from-sh", "sh: %v %q", err, out)
 
+	stage("cat with pipes")
 	// stdin pipe -> child -> stdout pipe
 	cmd := exec.Command("cat")
 	cmd.Stdin = strings.NewReader("piped through cat\n")
@@ -41,12 +45,14 @@ func main() {
 	err = cmd.Run()
 	check(err == nil && buf.String() == "piped through cat\n", "cat: %v %q", err, buf.String())
 
+	stage("lookup/start failures")
 	// lookup failure and start failure
 	_, err = exec.LookPath("definitely-not-a-program")
 	check(err != nil, "LookPath should fail")
 	err = exec.Command("/nonexistent/prog").Run()
 	check(err != nil, "running a nonexistent path should fail")
 
+	stage("parallel children")
 	// parallel children
 	done := make(chan string, 4)
 	for i := 0; i < 4; i++ {

@@ -33,6 +33,7 @@ jobs:
         if: matrix.variant != 'stock'
         timeout-minutes: 6
         run: |
+          sudo apt-get install -y -qq nasm >/dev/null
           rustup toolchain install nightly-2026-05-24 --profile minimal -c rust-src 2>&1 | tail -3
           mkdir /tmp/kernel-src && cd /tmp/kernel-src
           git init -q . && git remote add origin https://gitlab.redox-os.org/redox-os/kernel.git
@@ -51,8 +52,9 @@ jobs:
         run: |
           mkdir -p /tmp/pkg/out
           docker pull redoxos/redoxer >/dev/null
+          cp $GITHUB_WORKSPACE/.github/redox/ladder/x17_exit_c/main.c /tmp/x17.c
           docker run --rm -v /tmp:/tmp -w /tmp redoxos/redoxer redoxer cc -O1 -pthread \
-            -o /tmp/pkg/out/x17_exit_c.bin $GITHUB_WORKSPACE/.github/redox/ladder/x17_exit_c/main.c
+            -o /tmp/pkg/out/x17_exit_c.bin /tmp/x17.c
           chmod +x /tmp/pkg/out/x17_exit_c.bin
           cp $GITHUB_WORKSPACE/.github/redox/run_common.sh /tmp/pkg/out/common.sh
           cp $GITHUB_WORKSPACE/.github/redox/kernel/run_kernel_ab.sh /tmp/pkg/out/
@@ -79,7 +81,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import re, collections, os
-          t = open('/tmp/kab.log', errors='replace').read().replace('\r', '')
+          t = open('/tmp/kab.log', errors='replace').read().replace('\r', '') if os.path.exists('/tmp/kab.log') else ''
           c = collections.defaultdict(lambda: [0, 0])
           for m in re.finditer(r"=== BEGIN \S*?/(\w+)\.bin variant=(\w+) run=\d+\n(.*?)=== END", t, re.S):
               k = (m.group(1), m.group(2)); c[k][0] += 1
