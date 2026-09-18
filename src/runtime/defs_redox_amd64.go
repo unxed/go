@@ -227,13 +227,17 @@ func (ts *timespec) set_nsec(x int32) {
 	ts.tv_nsec = int64(x)
 }
 
+// suseconds_t is a 4-byte c_int on this target (bits_suseconds-t/mod.rs),
+// not the 8-byte c_long I had initially assumed -- caught by the CI cgo
+// cross-check (.github/workflows/redox-defs-crosscheck.yml).
 type timeval struct {
-	tv_sec  int64
-	tv_usec int64
+	tv_sec    int64
+	tv_usec   int32
+	pad_cgo_0 [4]byte
 }
 
 func (tv *timeval) set_usec(x int32) {
-	tv.tv_usec = int64(x)
+	tv.tv_usec = x
 }
 
 type itimerval struct {

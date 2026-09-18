@@ -137,7 +137,7 @@ type fld struct {{
 
 func skip(n string) bool {{
 	l := strings.ToLower(n)
-	return strings.HasPrefix(l, "pad") || strings.HasPrefix(l, "_pad") || n == "_"
+	return strings.HasPrefix(l, "pad") || strings.HasPrefix(l, "_pad") || strings.HasPrefix(l, "x_pad") || n == "_"
 }}
 
 func fields(t reflect.Type) []fld {{

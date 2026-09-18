@@ -186,6 +186,11 @@ func (t *Target) IsHaiku() bool {
 	return t.HeadType == objabi.Hhaiku
 }
 
+func (t *Target) IsRedox() bool {
+	t.mustSetHeadType()
+	return t.HeadType == objabi.Hredox
+}
+
 func (t *Target) mustSetHeadType() {
 	if t.HeadType == objabi.Hunknown {
 		panic("HeadType is not set")

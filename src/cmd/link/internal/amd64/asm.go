@@ -317,7 +317,11 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 	case objabi.R_ADDR:
 		if ldr.SymType(s).IsText() && target.IsElf() {
 			su := ldr.MakeSymbolUpdater(s)
-			if target.IsSolaris() || target.IsHaiku() {
+			// On platforms where the runtime calls libc through
+			// libcall (Solaris, Haiku, Redox), the "address" of an
+			// imported function must be callable: use its PLT stub, not
+			// the GOT slot (which is data; CALLing it faults on NX).
+			if target.IsSolaris() || target.IsHaiku() || target.IsRedox() {
 				addpltsym(target, ldr, syms, targ)
 				su.SetRelocSym(rIdx, syms.PLT)
 				su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymPlt(targ)))
