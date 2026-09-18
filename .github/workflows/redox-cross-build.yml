@@ -136,15 +136,18 @@ jobs:
             ) &
             sp=$!
             t=0
-            while [ ! -f /tmp/rc.done ] && [ $t -lt 20 ]; do sleep 1; t=$((t+1)); done
+            while [ ! -f /tmp/rc.done ] && [ $t -lt ${4:-20} ]; do sleep 1; t=$((t+1)); done
             if [ -f /tmp/rc.done ]; then
               rc=`cat /tmp/rc.done`
             else
               echo "HANG $bin"
               # kernel view of every thread of the hung process (STAT: U=user; R=runnable S=sleeping B=blocked Z=dead; + = on a CPU)
               b=`basename $bin .bin`
-              echo "--- /scheme/sys/context rows for $b"
-              cat /scheme/sys/context 2>&1 | grep -E "^PID|$b"
+              echo "--- /scheme/sys/context (header + rows for $b + every non-sleeping row)"
+              head -1 /scheme/sys/context 2>&1
+              grep "$b" /scheme/sys/context 2>&1
+              echo "--- full table (first 80 rows)"
+              head -80 /scheme/sys/context 2>&1
               echo "---"
               kill -9 $sp 2>/dev/null
               rc=hang
@@ -172,9 +175,11 @@ jobs:
           run_one /root/mnt/p08_memzero.bin default 1
           # exit-hang probe (diagnostic): many runs of a program that returns from main with several Ms alive
           n=1
-          while [ $n -le 20 ]; do run_one /root/mnt/x11_exitloop.bin default $n; n=$((n+1)); done
+          while [ $n -le 10 ]; do run_one /root/mnt/x11_exitloop.bin default $n 10; n=$((n+1)); done
           n=1
-          while [ $n -le 10 ]; do run_one /root/mnt/x11_exitloop.bin procs1 $n; n=$((n+1)); done
+          while [ $n -le 6 ]; do run_one /root/mnt/x11_exitloop.bin procs1 $n 10; n=$((n+1)); done
+          n=1
+          while [ $n -le 20 ]; do run_one /root/mnt/x11_exitloop.bin preempt $n 10; n=$((n+1)); done
           echo "=== LADDER DONE"
           EOF
           ls -la out
