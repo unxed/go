@@ -57,6 +57,8 @@ jobs:
           # vendor all dependencies, then treat hurd like solaris in their build constraints
           GOFLAGS=-mod=mod go mod vendor 2> /tmp/out/vendor.err || { cat /tmp/out/vendor.err | tail -20; }
           python3 "$GOROOT/.github/scripts/hurd_retag.py" vendor . | tee /tmp/out/retag.txt | head -60
+          # files that exist only for hurd (until they are upstreamed to unxed/f4)
+          cp -r "$GOROOT/misc/hurd/f4-overlay/." .
           # afero: BADFD is EBADFD (linux only) elsewhere; hurd behaves like the BSDs here
           sed -i 's/aix || darwin || openbsd/aix || darwin || hurd || openbsd/' vendor/github.com/spf13/afero/const_bsds.go
           sed -i 's/!darwin \&\& !openbsd/!darwin \&\& !hurd \&\& !openbsd/' vendor/github.com/spf13/afero/const_win_unix.go

@@ -88,6 +88,11 @@ type libcFunc uintptr
 //go:cgo_import_dynamic libcx_utimensat utimensat "libc.so.0.3"
 //go:cgo_import_dynamic libcx_uname uname "libc.so.0.3"
 //go:cgo_import_dynamic libcx_select select "libc.so.0.3"
+//go:cgo_import_dynamic libcx_getpgid getpgid "libc.so.0.3"
+//go:cgo_import_dynamic libcx_posix_openpt posix_openpt "libc.so.0.3"
+//go:cgo_import_dynamic libcx_grantpt grantpt "libc.so.0.3"
+//go:cgo_import_dynamic libcx_unlockpt unlockpt "libc.so.0.3"
+//go:cgo_import_dynamic libcx_ptsname_r ptsname_r "libc.so.0.3"
 //go:cgo_import_dynamic libcx_flock flock "libc.so.0.3"
 //go:cgo_import_dynamic libcx_mmap mmap "libc.so.0.3"
 
@@ -101,6 +106,11 @@ type libcFunc uintptr
 //go:linkname libcx_utimensat libcx_utimensat
 //go:linkname libcx_uname libcx_uname
 //go:linkname libcx_select libcx_select
+//go:linkname libcx_getpgid libcx_getpgid
+//go:linkname libcx_posix_openpt libcx_posix_openpt
+//go:linkname libcx_grantpt libcx_grantpt
+//go:linkname libcx_unlockpt libcx_unlockpt
+//go:linkname libcx_ptsname_r libcx_ptsname_r
 //go:linkname libcx_flock libcx_flock
 //go:linkname libcx_mmap libcx_mmap
 
@@ -115,6 +125,11 @@ var (
 	libcx_utimensat,
 	libcx_uname,
 	libcx_select,
+	libcx_getpgid,
+	libcx_posix_openpt,
+	libcx_grantpt,
+	libcx_unlockpt,
+	libcx_ptsname_r,
 	libcx_flock,
 	libcx_mmap libcFunc
 )
@@ -383,4 +398,41 @@ func MmapPtr(fd int, offset int64, addr unsafe.Pointer, length uintptr, prot int
 		return nil, e
 	}
 	return unsafe.Pointer(r), nil
+}
+
+// Getpgid returns the process group ID of pid.
+func Getpgid(pid int) (int, error) {
+	r, _, e := sysvicall6(uintptr(unsafe.Pointer(&libcx_getpgid)), 1, uintptr(pid), 0, 0, 0, 0, 0)
+	if int(r) == -1 {
+		return -1, e
+	}
+	return int(r), nil
+}
+
+// Openpty is a Hurd-shim extension (not part of x/sys/unix): it allocates a
+// pseudo-terminal with posix_openpt/grantpt/unlockpt and returns the master
+// descriptor and the name of the slave (BSD style on Hurd: /dev/ptyXN -> /dev/ttyXN).
+func Openpty(flags int) (master int, slave string, err error) {
+	r, _, e := sysvicall6(uintptr(unsafe.Pointer(&libcx_posix_openpt)), 1, uintptr(flags), 0, 0, 0, 0, 0)
+	if int(r) == -1 {
+		return -1, "", e
+	}
+	master = int(r)
+	if err := callErr(&libcx_grantpt, 1, uintptr(master), 0, 0, 0, 0, 0); err != nil {
+		syscall.Close(master)
+		return -1, "", err
+	}
+	if err := callErr(&libcx_unlockpt, 1, uintptr(master), 0, 0, 0, 0, 0); err != nil {
+		syscall.Close(master)
+		return -1, "", err
+	}
+	var buf [256]byte
+	if rc, _, e := sysvicall6(uintptr(unsafe.Pointer(&libcx_ptsname_r)), 3, uintptr(master), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)), 0, 0, 0); rc != 0 {
+		syscall.Close(master)
+		if e == 0 {
+			e = syscall.Errno(rc)
+		}
+		return -1, "", e
+	}
+	return master, ByteSliceToString(buf[:]), nil
 }
