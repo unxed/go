@@ -104,3 +104,35 @@ run-hurd-poc #35380952163).
 - `net` (does not compile: needs `sock_*`, `sockopt_hurd`, `interface_*`, ...): next phase.
 - `os/exec` / `fork` in a multithreaded process on glibc Hurd — untested.
 - `GRND_*` are hard-coded (glibc values, not probed on Hurd).
+
+## 2026-09-18 — net, os/exec, signals: what works and how glibc Hurd signals differ
+
+Working on real Hurd (poc/gotests, run-hurd-poc #35398737419; each program 10/10 in `poc/loop_tests.sh`):
+`net` (TCP/UDP/unix sockets on loopback, deadlines, `net/http` server+client, pure-Go resolver),
+`os/exec` (fork+exec from a multithreaded process, pipes, exit status), `os/signal` (SIGUSR1),
+runtime panics from hardware faults (nil deref, wild address) and the rest of phase 2.
+`go build std` for hurd/amd64 has no errors.
+
+### glibc Hurd signal delivery — two properties Go must work around (read from glibc's
+`sysdeps/mach/hurd/x86/trampoline.c` and `x86_64/sigreturn.c`, confirmed with `poc/ctx_poc.c`)
+1. **Register changes made by a handler are lost.** The `ucontext_t` given to an SA_SIGINFO handler is a
+   copy (`fill_ucontext`); `__sigreturn(scp)` restores from the `struct sigcontext` in the same stack frame
+   (mirror of `gregs[R8..RFL]` starting at `sc_r8`, 352 bytes below the ucontext). Go's sigpanic injection
+   rewrites RIP/RSP, so `sigtrampgohurd` writes the changed registers back into the sigcontext (found by
+   matching the original registers; `throw` if not found). This is what makes nil-deref/div panics work.
+2. **The alternate stack is chosen by the `SS_ONSTACK` flag, not by SP.** A signal that arrives while a handler
+   is active, or is replayed by `__sigreturn` (pending signals), runs on the interrupted user stack, i.e. on a
+   goroutine stack. `sigtrampgohurd` declares that stack the signal stack for the handler's duration.
+   The old Haiku-style `sigtramp` (direct `sighandler` call) could not cope; it now follows Solaris
+   (`sigtramp` -> `sigtrampgo`), with `sigfwd` defined.
+
+### Known limitation: asynchronous preemption is disabled (`preemptMSupported = GOOS != "hurd"`)
+With SIGURG preemption on, even after the two fixes above one run in ~10 of the test programs still failed
+intermittently (`unknown caller pc`, `fault`, hangs; with `GODEBUG=asyncpreemptoff=1` 0 failures in 70+ runs).
+Cause not found: the injected `asyncPreempt` call itself works (rip/rsp rewrites verified, tight-loop test passed
+in most runs). Consequence: a goroutine in a loop without function calls cannot be preempted, so a GC
+stop-the-world can wait for it forever. Cooperative preemption still works. Revisit later.
+
+### Tooling notes
+- `run_poc.py` runs every `poc/gotests/*.bin` under a guest-side `timeout -s KILL 60` (never Ctrl-C: it kills QEMU).
+- `run-hurd-poc.yml` inputs: `mkhurd` (regenerate zerrors/ztypes), `loops` (10x flakiness statistics).
