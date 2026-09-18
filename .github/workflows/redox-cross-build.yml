@@ -94,7 +94,7 @@ jobs:
       # rule out generic redoxer/CI plumbing (lost +x bit across the folder
       # copy, wrong TTY/env setup, etc.) by running an ordinary C program
       # built with redoxer's own compiler the exact same way.
-      - name: Control: build and run a trivial C program the same way (best effort)
+      - name: "Control: build and run a trivial C program the same way (best effort)"
         if: env.BUILD_RC == '0'
         continue-on-error: true
         timeout-minutes: 10
