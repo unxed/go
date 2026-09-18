@@ -41,6 +41,15 @@ func listVia(label string, fd int, dup bool) {
 	fmt.Printf("%-44s ok, %d entries\n", label, n)
 }
 
+func readNames(p string) ([]string, error) {
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return f.Readdirnames(-1)
+}
+
 func main() {
 	os.RemoveAll("/tmp/p07")
 	os.MkdirAll("/tmp/p07/sub", 0o755)
@@ -89,6 +98,37 @@ func main() {
 		names, err := f.Readdirnames(-1)
 		fmt.Println("os.NewFile(openat dir).Readdirnames:", names, err)
 		f.Close()
+	}
+	// Does mutating the directory beforehand break fdopendir+readdir?
+	// (p06 lists a directory after os.Rename-ing a file inside it.)
+	mut := []struct {
+		name string
+		do   func() error
+	}{
+		{"rename f->g", func() error { return os.Rename("/tmp/p07/f", "/tmp/p07/g") }},
+		{"unlink g", func() error { return os.Remove("/tmp/p07/g") }},
+		{"create h", func() error { return os.WriteFile("/tmp/p07/h", []byte("h"), 0o644) }},
+		{"mkdir sub2", func() error { return os.Mkdir("/tmp/p07/sub2", 0o755) }},
+		{"rename sub->sub3 (dir)", func() error { return os.Rename("/tmp/p07/sub", "/tmp/p07/sub3") }},
+	}
+	for _, m := range mut {
+		if err := m.do(); err != nil {
+			fmt.Printf("after %-24s op error: %v\n", m.name, err)
+			continue
+		}
+		fd, err := syscall.Open("/tmp/p07", rd, 0)
+		if err == nil {
+			listVia("after "+m.name+": open abs (dup)", fd, true)
+			syscall.Close(fd)
+		}
+		fd, err = syscall.Openat(parent, "p07", rd|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+		if err == nil {
+			listVia("after "+m.name+": openat (dup)", fd, true)
+			syscall.Close(fd)
+		}
+		if names, err := readNames("/tmp/p07"); true {
+			fmt.Printf("after %-24s os.Open+Readdirnames: %v %v\n", m.name, names, err)
+		}
 	}
 	os.RemoveAll("/tmp/p07")
 	fmt.Println("OK p07_openat_diag")

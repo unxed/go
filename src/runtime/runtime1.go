@@ -432,6 +432,19 @@ func parseRuntimeDebugVars(godebug string) {
 			}
 		}
 	}
+	if GOOS == "redox" {
+		// Signal-based (async) preemption is off by default on Redox:
+		// relibc's __relibc_internal_sigentry does `mov ecx, eax` (the
+		// 0-based signal number) *before* `push rcx`, so every
+		// asynchronously delivered signal resumes the interrupted thread
+		// with RCX = signal number (22 for SIGURG). The kernel only saves
+		// IP and RFLAGS when it redirects a user thread, so RCX is live.
+		// With sysmon's SIGURG preemption enabled this randomly corrupts
+		// Go code (see the RCX=0x16 crashes in the CI ladder); cooperative
+		// preemption is unaffected. GODEBUG=asyncpreemptoff=0 re-enables it
+		// once relibc is fixed.
+		debug.asyncpreemptoff = 1
+	}
 	// apply compile-time GODEBUG settings
 	parsegodebug(godebugDefault, nil)
 
