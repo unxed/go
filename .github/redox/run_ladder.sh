@@ -18,6 +18,8 @@ run_one /root/mnt/p12_stdin.bin stdin 1
 run_one /root/mnt/p13_signal.bin default 1
 run_one /root/mnt/x15_net.bin default 1
 run_one /root/mnt/x24_nilpanic.bin default 1
+run_one /root/mnt/x29_pty_c.bin default 1 30
+run_one /root/mnt/x30_pty.bin default 1 30
 run_one /root/mnt/x28_cgo.bin default 1 30
 run_one /root/mnt/x10_sigstorm.bin default 1
 run_one /root/mnt/x10_sigstorm.bin preempt 1

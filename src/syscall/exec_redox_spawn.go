@@ -69,28 +69,24 @@ const (
 
 func spawnCall(fn *libcFunc, nargs, a1, a2, a3, a4, a5, a6 uintptr) Errno {
 	r, _, _ := sysvicall6(uintptr(unsafe.Pointer(fn)), nargs, a1, a2, a3, a4, a5, a6)
-	if r != 0 && spawnDebug {
-		println("spawn(TEMP debug): libc fn", uintptr(unsafe.Pointer(fn)), "args", a2, a3, "-> errno", r)
-	}
 	return Errno(r)
 }
 
-const spawnDebug = true // TEMPORARY
 
 // spawnInChild starts the child with posix_spawn when the request can be
 // expressed that way; ok == false means the caller must fall back to
 // fork+exec. Unlike fork+exec, the child's argv[0] is always the program path
 // (relibc's spawn overwrites it).
 func spawnInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr *ProcAttr, sys *SysProcAttr) (pid int, err Errno, ok bool) {
-	// Another goroutine may close a descriptor between the scan for
-	// close-on-exec fds and relibc copying the file table; the child's
-	// "close" action then fails with EBADF. Rescan and retry.
-	for try := 0; ; try++ {
-		pid, err, ok = spawnOnce(argv0, argv, envv, chroot, dir, attr, sys)
-		if !ok || err != EBADF || try >= 5 {
-			return
-		}
+	pid, err, ok = spawnOnce(argv0, argv, envv, chroot, dir, attr, sys)
+	if ok && err == EBADF {
+		// relibc's spawn fails with EBADF for reasons not yet understood
+		// (deterministically for some descriptor layouts when several children
+		// are started at once) and leaves a half-built child process behind;
+		// retrying would only leak more of them. Fall back to fork+exec.
+		return 0, 0, false
 	}
+	return
 }
 
 func spawnOnce(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr *ProcAttr, sys *SysProcAttr) (pid int, err Errno, ok bool) {
@@ -157,10 +153,8 @@ func spawnOnce(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr *ProcAtt
 	// that is close-on-exec in the parent, but in practice does not (a `cat`
 	// child keeps the write end of its own stdin pipe open and never sees EOF;
 	// the exec status pipe stays open too). Do it explicitly.
-	var scanned []int // TEMPORARY debug
 	for fd := 3; fd < spawnScanLimit; fd++ {
 		if v, e := fcntl(fd, F_GETFD, 0); e == nil && v&FD_CLOEXEC != 0 {
-			scanned = append(scanned, fd)
 			if e := spawnCall(&libc_posix_spawn_file_actions_addclose, 2, uintptr(unsafe.Pointer(&fa)), uintptr(fd), 0, 0, 0, 0); e != 0 {
 				return 0, e, true
 			}
@@ -183,21 +177,6 @@ func spawnOnce(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr *ProcAtt
 	e := spawnCall(&libc_posix_spawn, 6, uintptr(unsafe.Pointer(&cpid)), uintptr(unsafe.Pointer(argv0)),
 		uintptr(unsafe.Pointer(&fa)), saptr, uintptr(unsafe.Pointer(&argv[0])), uintptr(unsafe.Pointer(&envv[0])))
 	if e != 0 {
-		if spawnDebug {
-			print("spawn(TEMP debug): posix_spawn failed errno ", uintptr(e), "; Files:")
-			for _, f := range fds {
-				print(" ", f)
-			}
-			print("; temps:")
-			for _, f := range temps {
-				print(" ", f)
-			}
-			print("; closes:")
-			for _, f := range scanned {
-				print(" ", f)
-			}
-			println()
-		}
 		return 0, e, true
 	}
 	forkExecSpawned = true // read by forkExec while it still holds ForkLock

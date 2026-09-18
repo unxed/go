@@ -15,9 +15,12 @@ import (
 // Solaris/Haiku/Hurd arming mechanism.
 
 //go:cgo_import_dynamic libc_poll poll "libc.so.6"
+//go:cgo_import_dynamic libc_isatty isatty "libc.so.6"
 //go:linkname libc_poll libc_poll
+//go:linkname libc_isatty libc_isatty
 
 var libc_poll libcFunc
+var libc_isatty libcFunc
 
 //go:nosplit
 func poll(pfds *pollfd, npfds uintptr, timeout uintptr) (int32, int32) {
@@ -37,6 +40,19 @@ const _POLLOUT = 0x0004
 const _POLLHUP = 0x0010
 const _POLLERR = 0x0008
 const _POLLNVAL = 0x0020
+
+// Terminals (and ptys) are not reliably pollable through relibc: poll()
+// reports no events for a tty slave even when a read would succeed. They stay
+// in pfds (so the bookkeeping is uniform) but are additionally marked
+// ready every ttyPollMs while anyone is polling: a reader whose read()
+// returned EAGAIN then simply retries. isTTY is parallel to pds; ttyCount
+// counts the true entries.
+const ttyPollMs = 10
+
+var (
+	isTTY    []bool
+	ttyCount int
+)
 
 var (
 	pfds           []pollfd
@@ -68,6 +84,7 @@ func netpollinit() {
 
 	pds = make([]*pollDesc, 1, 128)
 	pds[0] = nil
+	isTTY = make([]bool, 1, 128)
 }
 
 func netpollIsPollDescriptor(fd uintptr) bool {
@@ -109,8 +126,27 @@ func netpollopen(fd uintptr, pd *pollDesc) int32 {
 	pd.user = uint32(len(pfds))
 	pfds = append(pfds, pollfd{fd: int32(fd)})
 	pds = append(pds, pd)
+	tty := sysvicall1(&libc_isatty, fd) == 1
+	isTTY = append(isTTY, tty)
+	if tty {
+		ttyCount++
+	}
 	unlock(&mtxset)
 	return 0
+}
+
+// ttyReady marks every registered terminal ready (netpollmtxset held).
+func ttyReady(toRun *gList) int32 {
+	delta := int32(0)
+	if ttyCount == 0 {
+		return 0
+	}
+	for i := 1; i < len(pds); i++ {
+		if isTTY[i] {
+			delta += netpollready(toRun, pds[i], 'r'+'w')
+		}
+	}
+	return delta
 }
 
 func netpollclose(fd uintptr) int32 {
@@ -128,6 +164,11 @@ func netpollclose(fd uintptr) int32 {
 			pds[i] = pds[len(pds)-1]
 			pds[i].user = uint32(i)
 			pds = pds[:len(pds)-1]
+			if isTTY[i] {
+				ttyCount--
+			}
+			isTTY[i] = isTTY[len(isTTY)-1]
+			isTTY = isTTY[:len(isTTY)-1]
 			break
 		}
 	}
@@ -172,6 +213,13 @@ func netpoll(delay int64) (gList, int32) {
 		timeout = ^uintptr(0)
 	} else if delay == 0 {
 		// TODO: call poll with timeout == 0
+		if ttyCount > 0 {
+			var toRun gList
+			lock(&mtxset)
+			delta := ttyReady(&toRun)
+			unlock(&mtxset)
+			return toRun, delta
+		}
 		return gList{}, 0
 	} else if delay < 1e6 {
 		timeout = 1
@@ -181,6 +229,9 @@ func netpoll(delay int64) (gList, int32) {
 		// An arbitrary cap on how long to wait for a timer.
 		// 1e9 ms == ~11.5 days.
 		timeout = 1e9
+	}
+	if ttyCount > 0 && timeout > ttyPollMs {
+		timeout = ttyPollMs // see isTTY: terminals are polled by ticking
 	}
 retry:
 	lock(&mtxpoll)
@@ -237,6 +288,7 @@ retry:
 			n--
 		}
 	}
+	delta += ttyReady(&toRun)
 	unlock(&mtxset)
 	return toRun, delta
 }
