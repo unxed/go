@@ -27,6 +27,13 @@ func checkfds() {
 		EBADF   = int32(0x7fffa000)
 	}
 
+	if GOOS == "hurd" {
+		// Hurd errno values are Mach error codes (system 0x10, subsystem 0),
+		// not small integers; O_RDWR is O_RDONLY|O_WRONLY, not a distinct bit.
+		EBADF = int32(0x40000009)
+		O_RDWR = 0x3
+	}
+
 	devNull := []byte("/dev/null\x00")
 	for i := 0; i < 3; i++ {
 		ret, errno := fcntl(int32(i), F_GETFD, 0)
