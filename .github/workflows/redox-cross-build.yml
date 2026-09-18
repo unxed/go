@@ -128,7 +128,7 @@ jobs:
             (
               case "$variant" in
                 default) $bin ;;
-                nopreempt) GODEBUG=asyncpreemptoff=1 $bin ;;
+                preempt) GODEBUG=asyncpreemptoff=0 $bin ;;
                 procs1) GOMAXPROCS=1 $bin ;;
               esac
               echo $? > /tmp/rc.done
@@ -145,18 +145,25 @@ jobs:
             fi
             echo "=== END $bin variant=$variant run=$n exit=$rc"
           }
+          # file I/O and the basics first: they must always get to run
           run_one /root/mnt/p01_println.bin default 1
-          # signal-return probe first: plain signals (no asyncPreempt injection) then with
-          run_one /root/mnt/p10_sigstorm.bin nopreempt 1
+          run_one /root/mnt/p06_fileio.bin default 1
+          run_one /root/mnt/p07_openat_diag.bin default 1
+          run_one /root/mnt/p03_goroutines.bin default 1
+          run_one /root/mnt/p05_timer.bin default 1
+          # "default" = runtime defaults (async preemption OFF on redox, see
+          # runtime1.go); "preempt" = GODEBUG=asyncpreemptoff=0 re-enables
+          # the signal path that trips over relibc's RCX-clobbering sigentry
+          for n in 1 2 3; do run_one /root/mnt/p02_fmt.bin default $n; done
+          for n in 1 2; do run_one /root/mnt/p02_fmt.bin procs1 $n; done
+          for n in 1 2 3; do run_one /root/mnt/p02_fmt.bin preempt $n; done
           run_one /root/mnt/p10_sigstorm.bin default 1
-          # flake probe: the tiny fmt program under three variants
-          for n in 1 2 3 4; do
-            for v in default nopreempt procs1; do run_one /root/mnt/p02_fmt.bin $v $n; done
-          done
-          # gating: the remaining rungs once, plain
-          for p in /root/mnt/p03*.bin /root/mnt/p04*.bin /root/mnt/p05*.bin /root/mnt/p06*.bin /root/mnt/p07*.bin /root/mnt/p08*.bin /root/mnt/p09*.bin; do
-            run_one $p default 1
-          done
+          run_one /root/mnt/p10_sigstorm.bin preempt 1
+          # memory/GC-heavy rungs last: they have occasionally frozen the
+          # whole VM (not just the process)
+          run_one /root/mnt/p04_gc.bin default 1
+          run_one /root/mnt/p09_stack.bin default 1
+          run_one /root/mnt/p08_memzero.bin default 1
           echo "=== LADDER DONE"
           EOF
           ls -la out
@@ -181,7 +188,7 @@ jobs:
         timeout-minutes: 5
         run: |
           docker pull redoxos/redoxer >/dev/null
-          timeout 270 docker run --rm -v /tmp/ladder/out:/mnt redoxos/redoxer \
+          timeout 240 docker run --rm -v /tmp/ladder/out:/mnt redoxos/redoxer \
             redoxer exec -f /mnt -- sh /root/mnt/run_ladder.sh 2>&1 | tee /tmp/redoxer-exec.log
 
       - name: Upload redoxer exec log

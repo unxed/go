@@ -6,7 +6,7 @@ Reads /tmp/ladder-build.txt ("<name> BUILD_OK|BUILD_FAIL" per line) and
 program is run several times under three variants:
 
     default     plain
-    nopreempt   GODEBUG=asyncpreemptoff=1   (isolates the signal/preemption path)
+    preempt     GODEBUG=asyncpreemptoff=0   (re-enables the signal path that trips relibc's RCX bug)
     procs1      GOMAXPROCS=1                (isolates multi-thread effects)
 
 Each run is bracketed by "=== BEGIN <path> variant=V run=N" and
@@ -45,7 +45,7 @@ for m in re.finditer(
     )
     runs[(name, variant)].append((ok, code, out))
 
-VARIANTS = ["default", "nopreempt", "procs1"]
+VARIANTS = ["default", "preempt", "procs1"]
 rows, failed = [], False
 for name in sorted(build):
     if build[name] != "BUILD_OK":
@@ -71,7 +71,7 @@ for name in sorted(build):
     rows.append([name, "built"] + cells + [tail])
 
 md = [
-    "| program | build | default | nopreempt | procs1 | first failing output / last output |",
+    "| program | build | default | preempt (async preemption on) | procs1 | first failing output / last output |",
     "|---|---|---|---|---|---|",
 ]
 for r in rows:
