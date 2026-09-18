@@ -1,0 +1,177 @@
+name: redox-relibc-verify
+
+# Verifies .github/redox/relibc/sigentry-rcx.patch: builds relibc (pinned
+# upstream master commit) unpatched and patched inside the redoxer
+# environment, links the same Go programs against each build's libc.so as
+# their ELF interpreter, and runs them in a Redox VM with Go's async
+# (SIGURG) preemption ENABLED. Expected: unpatched crashes, patched passes.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [golang-1.26-redox]
+    paths:
+      - '.github/workflows/redox-relibc-verify.yml'
+      - '.github/redox/relibc/**'
+      - '.github/redox/relibc_verify_summary.py'
+
+permissions:
+  contents: read
+
+env:
+  RELIBC_COMMIT: 69bb008af1f6d93758631cf0df250500d53a065b
+
+jobs:
+  relibc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [unpatched, patched]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull redoxer image
+        timeout-minutes: 4
+        run: docker pull redoxos/redoxer
+
+      - name: Fetch relibc at the pinned upstream commit
+        timeout-minutes: 4
+        run: |
+          mkdir relibc && cd relibc
+          git init -q
+          git remote add origin https://gitlab.redox-os.org/redox-os/relibc.git
+          git fetch --depth 1 origin "$RELIBC_COMMIT"
+          git checkout -q FETCH_HEAD
+          git submodule update --init --recursive --depth 1
+          git log -1 --format='%H %s'
+
+      - name: Apply sigentry-rcx.patch (patched variant only)
+        if: matrix.variant == 'patched'
+        run: |
+          cd relibc
+          git apply --check ../.github/redox/relibc/sigentry-rcx.patch
+          git apply ../.github/redox/relibc/sigentry-rcx.patch
+          git diff --stat
+
+      - name: Build relibc inside the redoxer environment
+        timeout-minutes: 12
+        run: |
+          docker run --rm -v "$PWD/relibc:/src" -v "$PWD/.github/redox/relibc:/scripts:ro" redoxos/redoxer \
+            sh /scripts/build_relibc.sh 2>&1 | tee build-${{ matrix.variant }}.log
+
+      - name: Collect libc.so
+        if: always()
+        run: |
+          mkdir -p out/${{ matrix.variant }}
+          B=relibc/target/x86_64-unknown-redox/release
+          cp $B/libc.so out/${{ matrix.variant }}/libc.so
+          cp $B/libc.so out/${{ matrix.variant }}/libc.so.6
+          cp $B/libc.so out/${{ matrix.variant }}/ld64.so.1
+          sha256sum out/${{ matrix.variant }}/libc.so; ls -la out/${{ matrix.variant }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relibc-${{ matrix.variant }}
+          path: |
+            out/${{ matrix.variant }}
+            build-${{ matrix.variant }}.log
+            relibc/build1.log
+            relibc/build2.log
+          if-no-files-found: warn
+
+  go-bins:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+      - name: Build host (linux/amd64) toolchain
+        timeout-minutes: 4
+        working-directory: src
+        run: |
+          export GOROOT_BOOTSTRAP=$(dirname $(dirname $(which go)))
+          ./make.bash
+      - name: Build test programs against each relibc's ld.so (custom ELF interpreter)
+        timeout-minutes: 3
+        run: |
+          export GOROOT=$(pwd)
+          export PATH=$GOROOT/bin:$PATH
+          rm -rf /tmp/w && mkdir -p /tmp/w/bins && cp -r .github/redox/ladder/* /tmp/w/
+          printf 'module w\n\ngo 1.26\n' > /tmp/w/go.mod
+          cd /tmp/w
+          for v in unpatched patched; do
+            for p in p02_fmt x10_sigstorm; do
+              GOOS=redox GOARCH=amd64 CGO_ENABLED=0 go build \
+                -ldflags="-I /root/mnt/$v/ld64.so.1" -o bins/${p}_$v.bin ./$p
+            done
+          done
+          ls -la bins; file bins/p02_fmt_patched.bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: go-bins
+          path: /tmp/w/bins
+
+  verify:
+    needs: [relibc, go-bins]
+    if: always() && needs.go-bins.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+      - name: Assemble the VM folder
+        run: |
+          find art -maxdepth 3 | head -40
+          mkdir -p vm/bins
+          cp art/go-bins/* vm/bins/
+          for v in unpatched patched; do
+            d=$(find art/relibc-$v -type d -name $v | head -1)
+            [ -n "$d" ] && cp -r "$d" vm/$v || echo "no libc for $v"
+          done
+          chmod +x vm/bins/*.bin
+          cat > vm/run.sh <<'EOF'
+          run_one() {
+            v="$1"; prog="$2"; n="$3"
+            bin=/root/mnt/bins/${prog}_$v.bin
+            echo "=== BEGIN $bin variant=$v run=$n"
+            rm -f /tmp/rc.done
+            ( LD_LIBRARY_PATH=/root/mnt/$v GODEBUG=asyncpreemptoff=0 $bin ; echo $? > /tmp/rc.done ) &
+            sp=$!
+            t=0
+            while [ ! -f /tmp/rc.done ] && [ $t -lt 25 ]; do sleep 1; t=$((t+1)); done
+            if [ -f /tmp/rc.done ]; then rc=`cat /tmp/rc.done`; else echo "HANG $bin"; kill -9 $sp 2>/dev/null; rc=hang; fi
+            echo "=== END $bin variant=$v run=$n exit=$rc"
+          }
+          for v in unpatched patched; do
+            run_one $v x10_sigstorm 1
+            run_one $v x10_sigstorm 2
+            n=1
+            while [ $n -le 15 ]; do run_one $v p02_fmt $n; n=$((n+1)); done
+          done
+          echo "=== VERIFY DONE"
+          EOF
+          ls -laR vm | head -40
+      - name: Run in a Redox VM with async preemption enabled
+        timeout-minutes: 6
+        continue-on-error: true
+        run: |
+          docker pull redoxos/redoxer >/dev/null
+          timeout 320 docker run --rm -e REDOXER_QEMU_ARGS='-smp 2' -v "$PWD/vm:/mnt" redoxos/redoxer \
+            redoxer exec -f /mnt -- sh /root/mnt/run.sh 2>&1 | tee /tmp/redoxer-exec.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relibc-verify-log
+          path: /tmp/redoxer-exec.log
+          if-no-files-found: ignore
+      - name: Summary (patched must pass everything; unpatched is expected to fail)
+        if: always()
+        run: python3 .github/redox/relibc_verify_summary.py
