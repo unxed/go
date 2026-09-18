@@ -86,35 +86,59 @@ func (c *sigctxt) set_rsp(x uint64)     { c.regs().gregs[_REG_RSP] = x }
 func (c *sigctxt) set_sigcode(x uint64) { c.info.si_code = int32(x) }
 func (c *sigctxt) set_sigaddr(x uint64) { c.info.si_addr = uintptr(x) }
 
-// The ucontext_t glibc passes to an SA_SIGINFO handler is a copy made by
-// fill_ucontext(); __sigreturn() restores the thread from the struct sigcontext
-// that sits in the same stack frame, below the ucontext_t. Changes a handler
-// makes to the ucontext (Go's async preemption and sigpanic injection rewrite
-// RIP/RSP) are therefore lost unless they are written back into the sigcontext.
-// gregs[REG_R8..REG_RFL] mirror the sigcontext from sc_r8 on (measured on real
-// Hurd, unxed/debian-hurd poc/ctx_poc.c: the mirror is 384-32 bytes below the
-// ucontext_t).
+// glibc's Hurd signal delivery has two properties Go must work around.
+//
+// 1. Register changes are lost. The ucontext_t passed to an SA_SIGINFO handler is
+// a copy made by fill_ucontext(); __sigreturn() restores the thread from the
+// struct sigcontext that sits in the same stack frame, below the ucontext_t.
+// Go's async preemption and sigpanic injection rewrite RIP/RSP in the ucontext,
+// so the changes must be written back into the sigcontext. gregs[REG_R8..REG_RFL]
+// mirror the sigcontext from sc_r8 on (measured on real Hurd, unxed/debian-hurd
+// poc/ctx_poc.c).
+//
+// 2. The alternate signal stack is selected by the SS_ONSTACK *flag*, not by the
+// stack pointer. While the flag is set (a signal handler is active, or
+// __sigreturn is replaying a signal that was pending), the next handler runs on
+// the interrupted user stack below the red zone: for us, on a goroutine stack
+// instead of the gsignal stack.
 const (
 	_NGREGS_MIRROR = 19 // R8 .. RFL
 	_SC_SEARCH_MAX = 2048
 )
 
-// sighandlerhurd runs sighandler and then propagates register changes to the
-// sigcontext. The sigcontext register block is found by matching the original
-// registers, so this does not depend on glibc's exact frame layout; if it cannot
-// be found the process dies loudly instead of re-faulting forever.
+// sigtrampgohurd is called by sigtramp (sys_hurd_amd64.s) and wraps sigtrampgo.
 //
-// hurdSigDebug (temporary): log the first register-changing signals.
-const hurdSigDebug = true
-
-var hurdSigCount uint32
-
 //go:nosplit
 //go:nowritebarrierrec
-func sighandlerhurd(sig uint32, info *siginfo, ctx unsafe.Pointer, gp *g) {
+func sigtrampgohurd(sig uint32, info *siginfo, ctx unsafe.Pointer) {
 	mc := &(*ucontext)(ctx).uc_mcontext
 	orig := mc.gregs
-	sighandler(sig, info, ctx, gp)
+
+	// Delivered on the interrupted goroutine's stack (see 2 above): declare that
+	// stack the signal stack for the duration of the handler, as
+	// adjustSignalStack does for the g0 stack.
+	var saved gsignalStack
+	adjusted := false
+	if gp := getg(); gp != nil && gp.m != nil && gp.m.gsignal != nil && gp != gp.m.g0 {
+		sp := uintptr(unsafe.Pointer(&sig))
+		if (sp < gp.m.gsignal.stack.lo || sp >= gp.m.gsignal.stack.hi) && sp >= gp.stack.lo && sp < gp.stack.hi {
+			st := stackt{ss_size: gp.stack.hi - gp.stack.lo}
+			setSignalstackSP(&st, gp.stack.lo)
+			setGsignalStack(&st, &saved)
+			adjusted = true
+		}
+	}
+
+	sigtrampgo(sig, info, ctx)
+
+	if adjusted {
+		restoreGsignalStack(&saved)
+	}
+
+	// Propagate register changes to the sigcontext (see 1 above). The block is
+	// found by matching the original registers, so this does not depend on
+	// glibc's exact frame layout; if it cannot be found die loudly instead of
+	// re-faulting forever.
 	if mc.gregs == orig {
 		return
 	}
@@ -122,16 +146,10 @@ func sighandlerhurd(sig uint32, info *siginfo, ctx unsafe.Pointer, gp *g) {
 	for a := uintptr(ctx) - _NGREGS_MIRROR*8; a >= uintptr(ctx)-_SC_SEARCH_MAX; a -= 8 {
 		sc := (*[_NGREGS_MIRROR]uint64)(unsafe.Pointer(a))
 		if *sc == *want {
-			if hurdSigDebug && hurdSigCount < 16 {
-				hurdSigCount++
-				println("sighandlerhurd sig=", sig, " ctx-sc=", uintptr(ctx)-a, " rip ", hex(orig[_REG_RIP]), "->", hex(mc.gregs[_REG_RIP]),
-					" rsp ", hex(orig[_REG_RSP]), "->", hex(mc.gregs[_REG_RSP]), " rax ", hex(orig[_REG_RAX]), "->", hex(mc.gregs[_REG_RAX]),
-					" rfl ", hex(orig[_REG_RFL]), "->", hex(mc.gregs[_REG_RFL]), " cs ", hex(orig[_REG_CS]), "->", hex(mc.gregs[_REG_CS]))
-			}
 			*sc = *(*[_NGREGS_MIRROR]uint64)(unsafe.Pointer(&mc.gregs))
 			return
 		}
 	}
-	println("sighandlerhurd: sig", sig, "changed registers but the sigcontext was not found")
-	throw("sighandlerhurd: cannot propagate register changes")
+	println("sigtrampgohurd: sig", sig, "changed registers but the sigcontext was not found")
+	throw("sigtrampgohurd: cannot propagate register changes")
 }
