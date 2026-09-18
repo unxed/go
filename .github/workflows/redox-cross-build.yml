@@ -95,157 +95,101 @@ jobs:
           if-no-files-found: ignore
 
       # The validation ladder: independent programs of increasing difficulty,
-      # each built separately so failures are attributable.
+      # each built separately so failures are attributable. x17 is plain C,
+      # compiled by redoxer's cross compiler (also proves the C toolchain works).
       - name: Build the validation-ladder programs
         timeout-minutes: 3
         run: |
           export GOROOT=$(pwd)
           export PATH=$GOROOT/bin:$PATH
-          rm -rf /tmp/ladder && mkdir -p /tmp/ladder/out
+          rm -rf /tmp/ladder /tmp/pkg && mkdir -p /tmp/ladder /tmp/pkg/out
           cp -r .github/redox/ladder/* /tmp/ladder/
           printf 'module ladder\n\ngo 1.26\n' > /tmp/ladder/go.mod
-          : > /tmp/ladder-build.txt
+          : > /tmp/pkg/ladder-build.txt
           cd /tmp/ladder
           for d in p*/ x*/; do
             n=${d%/}
-            if GOOS=redox GOARCH=amd64 CGO_ENABLED=0 go build -o out/$n.bin ./$n > /tmp/ladder-build-$n.log 2>&1; then
-              echo "$n BUILD_OK" >> /tmp/ladder-build.txt
-              chmod +x out/$n.bin
+            if [ -f $n/main.c ]; then
+              if /usr/local/bin/redox-cc -O1 -pthread -o /tmp/pkg/out/$n.bin $n/main.c > /tmp/ladder-build-$n.log 2>&1; then
+                echo "$n BUILD_OK" >> /tmp/pkg/ladder-build.txt
+              else
+                echo "$n BUILD_FAIL" >> /tmp/pkg/ladder-build.txt
+                echo "::group::build of $n failed"; head -60 /tmp/ladder-build-$n.log; echo "::endgroup::"
+              fi
+              continue
+            fi
+            if GOOS=redox GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/pkg/out/$n.bin ./$n > /tmp/ladder-build-$n.log 2>&1; then
+              echo "$n BUILD_OK" >> /tmp/pkg/ladder-build.txt
             else
-              echo "$n BUILD_FAIL" >> /tmp/ladder-build.txt
+              echo "$n BUILD_FAIL" >> /tmp/pkg/ladder-build.txt
               echo "::group::build of $n failed"; head -60 /tmp/ladder-build-$n.log; echo "::endgroup::"
             fi
           done
-          cat /tmp/ladder-build.txt
-          echo "LADDER_BUILT=$(grep -c BUILD_OK /tmp/ladder-build.txt)" >> "$GITHUB_ENV"
-          cat > out/run_ladder.sh <<'EOF'
-          # Never `wait` on a possibly wedged process (kill -9 does not always
-          # free it on Redox): run it in a background subshell that records
-          # its exit code, poll for that for up to 20s, and move on either way.
-          run_one() {
-            bin="$1"; variant="$2"; n="$3"
-            echo "=== BEGIN $bin variant=$variant run=$n"
-            rm -f /tmp/rc.done
-            (
-              case "$variant" in
-                default) $bin ;;
-                preempt) GODEBUG=asyncpreemptoff=0 $bin ;;
-                procs1) GOMAXPROCS=1 $bin ;;
-              esac
-              echo $? > /tmp/rc.done
-            ) &
-            sp=$!
-            t=0
-            while [ ! -f /tmp/rc.done ] && [ $t -lt ${4:-20} ]; do sleep 1; t=$((t+1)); done
-            if [ -f /tmp/rc.done ]; then
-              rc=`cat /tmp/rc.done`
-            else
-              echo "HANG $bin"
-              # kernel view of every thread of the hung process (STAT: U=user; R=runnable S=sleeping B=blocked Z=dead; + = on a CPU)
-              b=`basename $bin .bin`
-              echo "--- /scheme/sys/context (header + rows for $b + every non-sleeping row)"
-              head -1 /scheme/sys/context 2>&1
-              grep "$b" /scheme/sys/context 2>&1
-              echo "--- full table (first 80 rows)"
-              head -80 /scheme/sys/context 2>&1
-              echo "---"
-              kill -9 $sp 2>/dev/null
-              rc=hang
-            fi
-            echo "=== END $bin variant=$variant run=$n exit=$rc"
-          }
-          # file I/O and the basics first: they must always get to run
-          run_one /root/mnt/p01_println.bin default 1
-          run_one /root/mnt/p06_fileio.bin default 1
-          run_one /root/mnt/p07_openat_diag.bin default 1
-          run_one /root/mnt/p03_goroutines.bin default 1
-          run_one /root/mnt/p05_timer.bin default 1
-          # "default" = runtime defaults (async preemption OFF on redox, see
-          # runtime1.go); "preempt" = GODEBUG=asyncpreemptoff=0 re-enables
-          # the signal path that trips over relibc's RCX-clobbering sigentry
-          for n in 1 2 3; do run_one /root/mnt/p02_fmt.bin default $n; done
-          for n in 1 2; do run_one /root/mnt/p02_fmt.bin procs1 $n; done
-          for n in 1 2 3; do run_one /root/mnt/p02_fmt.bin preempt $n; done
-          run_one /root/mnt/x10_sigstorm.bin default 1
-          run_one /root/mnt/x10_sigstorm.bin preempt 1
-          # memory/GC-heavy rungs last: they have occasionally frozen the
-          # whole VM (not just the process)
-          run_one /root/mnt/p04_gc.bin default 1
-          run_one /root/mnt/p09_stack.bin default 1
-          run_one /root/mnt/p08_memzero.bin default 1
-          # exit-hang probe (diagnostic): many runs of a program that returns from main with several Ms alive
-          n=1
-          while [ $n -le 10 ]; do run_one /root/mnt/x11_exitloop.bin default $n 10; n=$((n+1)); done
-          n=1
-          while [ $n -le 6 ]; do run_one /root/mnt/x11_exitloop.bin procs1 $n 10; n=$((n+1)); done
-          n=1
-          while [ $n -le 20 ]; do run_one /root/mnt/x11_exitloop.bin preempt $n 10; n=$((n+1)); done
-          echo "=== LADDER DONE"
-          EOF
-          ls -la out
+          cp /tmp/ladder-build-*.log /tmp/pkg/
+          cp $GITHUB_WORKSPACE/.github/redox/run_*.sh /tmp/pkg/out/
+          # the run scripts are sourced from the VM as /root/mnt/common.sh
+          mv /tmp/pkg/out/run_common.sh /tmp/pkg/out/common.sh
+          cat /tmp/pkg/ladder-build.txt
+          ls -la /tmp/pkg/out
 
       - name: Upload build logs and binaries
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: redox-cross-build-output
-          path: |
-            /tmp/ladder/out
-            /tmp/ladder-build-*.log
-            /tmp/ladder-build.txt
+          path: /tmp/pkg
           if-no-files-found: warn
 
-      # Run all ladder programs in ONE QEMU boot (no /dev/kvm on GitHub-hosted
-      # runners, so a boot is TCG-slow, ~1 min). `-f /mnt` copies the host
-      # folder into the VM as /root/mnt/.
+  # The VM jobs run in parallel, each with its own QEMU boot (TCG, no KVM), so a
+  # round stays short.
+  vm-ladder:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: redox-cross-build-output
+          path: /tmp/pkg
       - name: Run the ladder under redoxer
-        if: env.LADDER_BUILT != '0'
         continue-on-error: true
-        timeout-minutes: 5
+        timeout-minutes: 6
         run: |
-          docker pull redoxos/redoxer >/dev/null
-          : > /tmp/redoxer-exec.log
-          ( timeout 270 docker run --name ladder --rm -e REDOXER_QEMU_ARGS='-smp 2' -v /tmp/ladder/out:/mnt redoxos/redoxer \
-              redoxer exec -f /mnt -- sh /root/mnt/run_ladder.sh > /tmp/redoxer-exec.log 2>&1 ) &
-          dpid=$!
-          last=0; idle=0
-          while kill -0 $dpid 2>/dev/null; do
-            sleep 5
-            size=$(stat -c %s /tmp/redoxer-exec.log)
-            if [ "$size" = "$last" ]; then idle=$((idle+5)); else idle=0; last=$size; fi
-            grep -aq "LADDER DONE" /tmp/redoxer-exec.log && break
-            if [ $idle -ge 75 ]; then
-              echo "VM FROZE: no output for ${idle}s; last line: $(tail -c 200 /tmp/redoxer-exec.log | tr -d '\r' | tail -1)" | tee -a /tmp/redoxer-exec.log
-              docker kill ladder 2>/dev/null
-              break
-            fi
-          done
-          docker kill ladder 2>/dev/null; wait $dpid 2>/dev/null
-          cat /tmp/redoxer-exec.log | tail -5
-
-      - name: Upload redoxer exec log
+          chmod +x /tmp/pkg/out/*.bin
+          .github/redox/vm_run.sh run_ladder.sh /tmp/redoxer-exec.log
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
           name: redoxer-exec-output
           path: /tmp/redoxer-exec.log
           if-no-files-found: ignore
-
-      - name: Symbolize the crash RIP (if any) with the built toolchain
+      - name: Ladder summary (fails unless every gating rung passed)
         if: always()
+        run: python3 .github/redox/ladder_summary.py /tmp/redoxer-exec.log main
+
+  vm-exit:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: redox-cross-build-output
+          path: /tmp/pkg
+      - name: Run the exit-hang probes under redoxer
+        continue-on-error: true
+        timeout-minutes: 6
         run: |
-          export GOROOT=$(pwd)
-          export PATH=$GOROOT/bin:$PATH
-          rip=$(grep -a "RIP:" /tmp/redoxer-exec.log 2>/dev/null | head -1 | tr -d '\r' | awk '{print $NF}')
-          if [ -z "$rip" ]; then echo "no crash RIP in log"; exit 0; fi
-          echo "crash RIP = 0x$rip"
-          for b in /tmp/ladder/out/*.bin; do
-            echo "--- $b"; echo "0x$rip" | go tool addr2line $b | head -2
-          done
-          grep -a -B4 -A14 "Breakpoint trap\|Page fault\|Invalid opcode\|General protection\|panic\|fatal error\|SIGSEGV\|goroutine " /tmp/redoxer-exec.log | tr -d '\r' | head -80
-
-      # The job status is the milestone signal: green only when every rung of
-      # the ladder built and printed its "OK <name>" line on Redox.
-      - name: Ladder summary (fails unless every rung passed)
+          chmod +x /tmp/pkg/out/*.bin
+          .github/redox/vm_run.sh run_exit.sh /tmp/redoxer-exit.log
+      - uses: actions/upload-artifact@v4
         if: always()
-        run: python3 .github/redox/ladder_summary.py
+        with:
+          name: redoxer-exit-output
+          path: /tmp/redoxer-exit.log
+          if-no-files-found: ignore
+      - name: Exit-probe summary (diagnostic; never fails the job)
+        if: always()
+        run: python3 .github/redox/ladder_summary.py /tmp/redoxer-exit.log exit || true

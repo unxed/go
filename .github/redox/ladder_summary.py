@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Summarise the validation ladder: which programs built, which ran on Redox.
 
-Reads /tmp/ladder-build.txt ("<name> BUILD_OK|BUILD_FAIL" per line) and
-/tmp/redoxer-exec.log (output of run_ladder.sh inside the Redox VM). Every
+usage: ladder_summary.py <vm-log> main|exit
+
+Reads /tmp/pkg/ladder-build.txt ("<name> BUILD_OK|BUILD_FAIL" per line) and
+the VM log (output of run_ladder.sh / run_exit.sh inside the Redox VM). "main"
+covers every program except the exit-hang probes, "exit" only those. Every
 program is run several times under three variants:
 
     default     plain
@@ -21,14 +24,16 @@ import re
 import sys
 from collections import defaultdict
 
+EXIT_SET = {"x11_exitloop", "x16_exitstress", "x17_exit_c"}
+logpath, which = sys.argv[1], sys.argv[2]
 build = {}
-for line in open("/tmp/ladder-build.txt"):
+for line in open("/tmp/pkg/ladder-build.txt"):
     parts = line.split()
-    if len(parts) == 2:
+    if len(parts) == 2 and ((parts[0] in EXIT_SET) == (which == "exit")):
         build[parts[0]] = parts[1]
 
 try:
-    log = open("/tmp/redoxer-exec.log", errors="replace").read().replace("\r", "")
+    log = open(logpath, errors="replace").read().replace("\r", "")
 except FileNotFoundError:
     log = ""
 
@@ -48,11 +53,11 @@ for m in re.finditer(
         ok = False
     runs[(name, variant)].append((ok, code, out, exit_hang))
 
-VARIANTS = ["default", "preempt", "procs1"]
+VARIANTS = [v for v in ["default", "preempt", "procs1", "stdin", "exitarg"] if any(k[1] == v for k in runs)]
 rows, failed = [], False
 for name in sorted(build):
     if build[name] != "BUILD_OK":
-        rows.append([name, "build FAILED", "-", "-", "-", ""])
+        rows.append([name, "build FAILED"] + ["-"] * len(VARIANTS) + [""])
         failed = failed or not name.startswith("x")
         continue
     cells, tail = [], ""
@@ -65,20 +70,22 @@ for name in sorted(build):
                 tail = f"[{v}] " + " / ".join(
                     [l for l in out.strip().split("\n") if l and "getrlimit" not in l][:3]
                 )
-        if v == "default":
+        if v in ("default", "stdin"):
             # x* programs are diagnostics (e.g. the signal stress test that
             # demonstrates the relibc RCX bug), not gating rungs
             if not name.startswith("x") and (not rs or not all(r[0] for r in rs)):
                 failed = True
+    if not name.startswith("x") and not any(runs.get((name, v)) for v in VARIANTS):
+        failed = True
     if not tail:
-        rs = runs.get((name, "default"), [])
+        rs = runs.get((name, "default"), []) or runs.get((name, "stdin"), [])
         if rs:
             tail = " / ".join([l for l in rs[-1][2].strip().split("\n") if l and "getrlimit" not in l][-2:])
     rows.append([name, "built"] + cells + [tail])
 
 md = [
-    "| program | build | default | preempt (async preemption on) | procs1 | first failing output / last output |",
-    "|---|---|---|---|---|---|",
+    "| program | build | " + " | ".join(VARIANTS) + " | first failing output / last output |",
+    "|---|---|" + "---|" * len(VARIANTS) + "---|",
 ]
 for r in rows:
     md.append("| " + " | ".join(str(x).replace("|", "\\|")[:300] for x in r) + " |")
