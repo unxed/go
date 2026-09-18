@@ -1,0 +1,38 @@
+name: redox-kernel-probe
+
+# Feasibility probe: can we rebuild the Redox kernel and boot it under redoxer
+# to verify a kernel patch? Only runs when .github/redox/kernel/** changes.
+on:
+  push:
+    branches: [golang-1.26-redox]
+    paths: ['.github/redox/kernel/**', '.github/workflows/redox-kernel-probe.yml']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect the redoxer image
+        timeout-minutes: 5
+        run: |
+          docker pull redoxos/redoxer >/dev/null
+          docker run --rm redoxos/redoxer sh -c '
+            echo "== whoami/home: $(whoami) $HOME"
+            ls -la $HOME $HOME/.redoxer 2>&1 | head -40
+            find / -xdev \( -name "*.img" -o -name "*.iso" -o -name "kernel" -o -name "bootloader*" -o -name "redoxfs*" -o -name "redoxer*" -o -name "*.efi" \) -not -path "/proc/*" 2>/dev/null | head -60
+            echo "== rustup"; rustup toolchain list 2>&1; rustc -V 2>&1
+            echo "== qemu"; which qemu-system-x86_64; qemu-system-x86_64 --version | head -1
+            echo "== redoxer usage"; redoxer --help 2>&1 | head -30
+          '
+      - name: Kernel source reachable + toolchain can target x86_64-unknown-none?
+        timeout-minutes: 4
+        run: |
+          curl -sfL --max-time 60 https://gitlab.redox-os.org/redox-os/kernel/-/archive/master/kernel-master.tar.gz -o /tmp/kernel.tgz && ls -la /tmp/kernel.tgz
+          mkdir -p /tmp/k && tar xzf /tmp/kernel.tgz -C /tmp/k --strip-components=1
+          cat /tmp/k/rust-toolchain.toml 2>/dev/null; ls /tmp/k | head -30
+          grep -n "kernel\|redoxfs\|img" /tmp/k/Makefile | head -20
