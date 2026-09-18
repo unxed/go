@@ -1,0 +1,23 @@
+diff --git a/redox-rt/src/arch/x86_64.rs b/redox-rt/src/arch/x86_64.rs
+index e90ec20..d3d5ba2 100644
+--- a/redox-rt/src/arch/x86_64.rs
++++ b/redox-rt/src/arch/x86_64.rs
+@@ -335,12 +335,14 @@ asmfunction!(__relibc_internal_sigentry: ["
+     // skip the sigaltstack logic.
+     lea rdx, [rip + {pctl} + {pctl_off_actions}]
+ 
+-    mov ecx, eax
+-    and ecx, 63
++    // Use r10 as scratch, not rcx: r10 was saved to the TCB above and is pushed from there below,
++    // whereas rcx is live application state that is pushed as-is further down.
++    mov r10d, eax
++    and r10d, 63
+ 
+     // LEA doesn't support 16x, so just do two x8s.
+-    lea rdx, [rdx + 8 * rcx]
+-    lea rdx, [rdx + 8 * rcx]
++    lea rdx, [rdx + 8 * r10]
++    lea rdx, [rdx + 8 * r10]
+ 
+     bt qword ptr [rdx], {SA_ONSTACK_BIT}
+     jnc 4f

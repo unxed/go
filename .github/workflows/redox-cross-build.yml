@@ -189,7 +189,7 @@ jobs:
         timeout-minutes: 5
         run: |
           docker pull redoxos/redoxer >/dev/null
-          timeout 240 docker run --rm -v /tmp/ladder/out:/mnt redoxos/redoxer \
+          timeout 240 docker run --rm -e REDOXER_QEMU_ARGS='-smp 2' -v /tmp/ladder/out:/mnt redoxos/redoxer \
             redoxer exec -f /mnt -- sh /root/mnt/run_ladder.sh 2>&1 | tee /tmp/redoxer-exec.log
 
       - name: Upload redoxer exec log
