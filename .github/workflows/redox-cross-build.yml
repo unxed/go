@@ -113,7 +113,7 @@ jobs:
           docker run --rm -v /tmp/chello:/mnt -w /mnt redoxos/redoxer \
             sh -c 'redoxer cc -o hello.bin hello.c && chmod +x hello.bin'
           docker run --rm -v /tmp/chello:/mnt redoxos/redoxer \
-            redoxer exec -f /mnt -- sh -c 'chmod +x /root/hello.bin; /root/hello.bin' 2>&1 | tee /tmp/redoxer-control.log
+            redoxer exec -f /mnt -- /root/mnt/hello.bin 2>&1 | tee /tmp/redoxer-control.log
 
       - name: Upload redoxer exec logs (if any)
         if: always()
