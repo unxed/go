@@ -21,7 +21,12 @@ import (
 // from the same library.
 //go:cgo_import_dynamic libc__errnop __errno_location "libc.so.6"
 //go:cgo_import_dynamic libc_clock_gettime clock_gettime "libc.so.6"
-//go:cgo_import_dynamic libc_exit exit "libc.so.6"
+// _exit, not exit: relibc's exit() runs pthread::terminate_from_main_thread,
+// which sends a cancellation signal to every other thread (all of Go's Ms)
+// before exiting -- extra asynchronous signals, and an intermittent hang /
+// zero-context fault at process exit was observed. Go needs neither atexit
+// handlers nor stdio flushing (and a forked child must not run them anyway).
+//go:cgo_import_dynamic libc_exit _exit "libc.so.6"
 //go:cgo_import_dynamic libc_kill kill "libc.so.6"
 //go:cgo_import_dynamic libc_getrlimit getrlimit "libc.so.6"
 //go:cgo_import_dynamic libc_malloc malloc "libc.so.6"
