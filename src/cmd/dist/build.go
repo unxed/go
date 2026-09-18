@@ -1077,6 +1077,7 @@ var unixOS = map[string]bool{
 	"linux":     true,
 	"netbsd":    true,
 	"openbsd":   true,
+	"redox":     true,
 	"solaris":   true,
 }
 
