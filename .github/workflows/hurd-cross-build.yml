@@ -93,6 +93,12 @@ jobs:
             echo "$t: build rc=$?"
             head -40 /tmp/gotests/out/$t.build.log
           done
+          # Default cross-build mode is CGO_ENABLED=0: make sure it links and runs too.
+          for t in t_fmt t_net t_http; do
+            GOOS=hurd GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/gotests/out/${t}_nocgo.bin ./$t > /tmp/gotests/out/${t}_nocgo.build.log 2>&1
+            echo "${t}_nocgo: build rc=$?"
+            head -40 /tmp/gotests/out/${t}_nocgo.build.log
+          done
           ls -l /tmp/gotests/out
 
       - name: Show result
