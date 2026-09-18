@@ -63,7 +63,8 @@ jobs:
           # golang.org/x/sys/unix has no gc/hurd port: replace the package by a hurd shim
           if [ -d "$GOROOT/misc/hurd/xsys-unix" ]; then
             rm -f vendor/golang.org/x/sys/unix/*
-            cp "$GOROOT"/misc/hurd/xsys-unix/*.go vendor/golang.org/x/sys/unix/
+            cp "$GOROOT"/misc/hurd/xsys-unix/*.go "$GOROOT"/misc/hurd/xsys-unix/*.s vendor/golang.org/x/sys/unix/
+            python3 "$GOROOT/.github/scripts/gen_unix_consts.py" "$GOROOT/src/syscall/zerrors_hurd_amd64.go" vendor/golang.org/x/sys/unix vendor/golang.org/x/sys/unix/zconsts_hurd.go
           fi
           git diff -- . ':!vendor' > /tmp/out/f4-own-changes.patch || true
           # which unix.* identifiers do f4 and its dependencies use (x/sys itself excluded)?
