@@ -49,7 +49,8 @@ jobs:
           perl mksyscall_redox.pl -tags redox,amd64 syscall_redox.go syscall_redox_amd64.go > zsyscall_redox_amd64.go
           wc -l z*_redox_amd64.go
           cd ../..
-          git status --short src/syscall | tee /tmp/gen-drift.txt
+          echo '--- drift of freshly generated files vs. the committed ones (empty = in sync) ---'
+          git diff --stat -- src/syscall/z*_redox_amd64.go | tee /tmp/gen-drift.txt
 
       - name: Upload generated syscall files
         if: always()
@@ -105,7 +106,7 @@ jobs:
           printf 'module ladder\n\ngo 1.26\n' > /tmp/ladder/go.mod
           : > /tmp/ladder-build.txt
           cd /tmp/ladder
-          for d in p*/; do
+          for d in p*/ x*/; do
             n=${d%/}
             if GOOS=redox GOARCH=amd64 CGO_ENABLED=0 go build -o out/$n.bin ./$n > /tmp/ladder-build-$n.log 2>&1; then
               echo "$n BUILD_OK" >> /tmp/ladder-build.txt
@@ -157,8 +158,8 @@ jobs:
           for n in 1 2 3; do run_one /root/mnt/p02_fmt.bin default $n; done
           for n in 1 2; do run_one /root/mnt/p02_fmt.bin procs1 $n; done
           for n in 1 2 3; do run_one /root/mnt/p02_fmt.bin preempt $n; done
-          run_one /root/mnt/p10_sigstorm.bin default 1
-          run_one /root/mnt/p10_sigstorm.bin preempt 1
+          run_one /root/mnt/x10_sigstorm.bin default 1
+          run_one /root/mnt/x10_sigstorm.bin preempt 1
           # memory/GC-heavy rungs last: they have occasionally frozen the
           # whole VM (not just the process)
           run_one /root/mnt/p04_gc.bin default 1

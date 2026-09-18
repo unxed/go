@@ -76,5 +76,5 @@ func main() {
 		fmt.Println("FAIL")
 		return
 	}
-	fmt.Println("OK p10_sigstorm")
+	fmt.Println("OK x10_sigstorm")
 }
