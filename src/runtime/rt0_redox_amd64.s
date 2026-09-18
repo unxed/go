@@ -13,8 +13,10 @@
 // state: MXCSR = 0 leaves every SSE exception unmasked and, since the kernel
 // does not enable CR4.OSXMMEXCPT, the first inexact result raises #UD
 // ("Invalid opcode fault" in runtime.fastexprand during mallocinit); the x87
-// control word is 0 likewise. fork()ed processes inherit sane values. Set the
-// ABI defaults (MXCSR 0x1f80, x87 CW 0x37f) before anything computes.
+// control word is 0 likewise. fork()ed processes inherit sane values, and
+// relibc's crt0 sets them for C programs -- but Go's ELF entry does not go
+// through crt0. Set the ABI defaults (MXCSR 0x1f80, x87 CW 0x37f) before
+// anything computes.
 TEXT _rt0_amd64_redox(SB),NOSPLIT,$-8
 	MOVQ	$0x1f80, AX
 	PUSHQ	AX

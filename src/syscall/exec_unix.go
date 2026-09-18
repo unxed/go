@@ -214,15 +214,18 @@ func forkExec(argv0 string, argv []string, attr *ProcAttr) (pid int, err error) 
 	}
 	spawned := forkExecSpawned
 	forkExecSpawned = false
-	releaseForkLock()
 	if spawned {
 		// Started with posix_spawn (redox): errors were returned synchronously
 		// and the child may still hold a copy of the status pipe, so there is
-		// nothing to read from it.
+		// nothing to read from it. Close our ends before letting go of
+		// ForkLock: a concurrent spawn lists the close-on-exec descriptors it
+		// sees and must not find these disappearing under it.
 		Close(p[0])
 		Close(p[1])
+		releaseForkLock()
 		return pid, nil
 	}
+	releaseForkLock()
 
 	// Read child error status from pipe.
 	Close(p[1])

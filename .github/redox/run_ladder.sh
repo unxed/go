@@ -29,7 +29,7 @@ run_one /root/mnt/x21_clock_c.bin default 1 60
 run_one /root/mnt/x19_clock.bin default 1 60
 # fork/exec last: they can freeze the whole VM, so nothing else may come after them
 run_one /root/mnt/x23_futex_fork_c.bin default 1 60
-run_one /root/mnt/x25_spawn_fpu_c.bin default 1 30
+run_one /root/mnt/x27_spawnpar_c.bin default 1 60
 run_one /root/mnt/x26_spawn_cloexec_c.bin default 1 30
 run_one /root/mnt/x18_fork_c.bin default 1
 run_one /root/mnt/x22_forkpar_c.bin default 1
