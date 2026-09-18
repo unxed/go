@@ -505,6 +505,7 @@ func raise(sig uint32) /* int32 */ {
 }
 
 func raiseproc(sig uint32) /* int32 */ {
+	pid := sysvicall0(&libc_getpid)
 	sysvicall2(&libc_kill, pid, uintptr(sig))
 }
 
