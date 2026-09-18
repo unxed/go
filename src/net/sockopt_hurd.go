@@ -25,7 +25,12 @@ func setDefaultSockopts(s, family, sotype int, ipv6only bool) error {
 
 func setDefaultListenerSockopts(s int) error {
 	// Allow reuse of recently-used addresses.
-	return os.NewSyscallError("setsockopt", syscall.SetsockoptInt(s, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1))
+	err := syscall.SetsockoptInt(s, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+	if err == syscall.ENOPROTOOPT {
+		// Measured on Hurd: pflocal (AF_UNIX) does not implement SO_REUSEADDR.
+		return nil
+	}
+	return os.NewSyscallError("setsockopt", err)
 }
 
 func setDefaultMulticastSockopts(s int) error {
