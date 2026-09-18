@@ -23,7 +23,17 @@ jobs:
         with:
           go-version: '1.24'
 
+      - name: Cache toolchain
+        id: tc
+        uses: actions/cache@v4
+        with:
+          path: |
+            bin
+            pkg
+          key: hurd-toolchain-${{ runner.os }}-${{ hashFiles('src/**', 'VERSION') }}
+
       - name: Build host toolchain
+        if: steps.tc.outputs.cache-hit != 'true'
         working-directory: src
         run: |
           export GOROOT_BOOTSTRAP=$(dirname $(dirname $(which go)))
@@ -33,23 +43,25 @@ jobs:
         run: |
           git clone --filter=blob:none https://github.com/unxed/f4 /tmp/f4
           cd /tmp/f4
-          git checkout "$(cat "$GITHUB_WORKSPACE/.github/f4-ref" | tr -d '[:space:]')"
+          git checkout "$(head -1 "$GITHUB_WORKSPACE/.github/f4-ref" | tr -d '[:space:]')"
           git log --oneline -1
 
       - name: Compile f4 for GOOS=hurd
         run: |
           export GOROOT=$(pwd)
           export PATH=$GOROOT/bin:$PATH
-          export GOTOOLCHAIN=local GOFLAGS=-mod=mod
+          export GOTOOLCHAIN=local
           go version
-          cd /tmp/f4
           mkdir -p /tmp/out
-          export GOOS=hurd GOARCH=amd64 CGO_ENABLED=0
-          go list -deps ./cmd/f4 > /tmp/out/deps.txt 2> /tmp/out/deps.err || true
-          echo "deps: $(wc -l < /tmp/out/deps.txt)"; head -30 /tmp/out/deps.err
+          cd /tmp/f4
+          # vendor all dependencies, then treat hurd like solaris in their build constraints
+          GOFLAGS=-mod=mod go mod vendor 2> /tmp/out/vendor.err || { cat /tmp/out/vendor.err | tail -20; }
+          python3 "$GOROOT/.github/scripts/hurd_retag.py" vendor . | tee /tmp/out/retag.txt | head -60
+          git diff -- . ':!vendor' > /tmp/out/f4-own-changes.patch || true
+          export GOOS=hurd GOARCH=amd64 CGO_ENABLED=0 GOFLAGS=-mod=vendor
           go build -gcflags=-e ./... > /tmp/out/build-all.log 2>&1 || true
-          grep -c '^#' /tmp/out/build-all.log | sed 's/^/packages with errors: /'
-          head -120 /tmp/out/build-all.log
+          echo "packages with errors: $(grep -c '^#' /tmp/out/build-all.log)"
+          head -150 /tmp/out/build-all.log
           go build -o /tmp/out/f4.bin ./cmd/f4 > /tmp/out/build-f4.log 2>&1
           echo "F4_RC=$?" | tee -a "$GITHUB_ENV"
           head -60 /tmp/out/build-f4.log
