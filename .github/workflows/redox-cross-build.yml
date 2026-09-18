@@ -82,29 +82,17 @@ jobs:
           chmod +x /tmp/redoxhello/redoxhello.bin
           # Bare smoke test first, no folder involved at all -- redoxer's
           # own Dockerfile uses exactly this ("RUN redoxer exec true") to
-          # verify basic exec works. If this also fails, the problem is
-          # generic QEMU/redoxerd capability in this sandbox (e.g. no KVM),
-          # not anything about our binary or the folder-copy mechanism.
+          # verify basic exec works.
           docker run --rm redoxos/redoxer redoxer exec true 2>&1 | tee /tmp/redoxer-smoketest.log || true
-          # A plain bind mount isn't enough -- redoxer exec runs the binary
-          # inside a QEMU-booted Redox VM, so the file has to be copied INTO
-          # that VM image via -f/--folder, not just visible to the host
-          # container. (First attempt without -f failed: "redoxerd: Failed
-          # to spawn ... /root" -- redoxer couldn't find the binary at all.)
-          # "true" (no -f) worked in the smoketest above, but a
-          # folder-copied binary consistently fails, and not even with a
-          # permissions error: chmod itself reports the path doesn't
-          # exist ("chmod: cannot access '/root/redoxhello.bin': No such
-          # file or directory"). So -f/--folder isn't actually placing the
-          # file where redoxer's own path translation believes it does --
-          # this is a redoxer/Docker CI plumbing issue (confirmed generic,
-          # not specific to this port: an equivalent plain-C control binary
-          # fails identically, see the next step), not evidence of a
-          # runtime bug. Left as a known follow-up rather than chased
-          # further here; the primary deliverable -- the cross-compile
-          # itself -- is unaffected and already confirmed working above.
+          # -f/--folder copies the given host folder into the VM as
+          # /root/<basename-of-the-given-path> (confirmed by an `ls -la
+          # /root` diagnostic in a previous round: `-f /mnt` landed as
+          # /root/mnt/, not flattened directly into /root/ as the earlier
+          # attempts assumed -- that mismatch, not a permissions or QEMU
+          # capability issue, is why every prior attempt got "No such file
+          # or directory" for /root/redoxhello.bin).
           docker run --rm -v /tmp/redoxhello:/mnt redoxos/redoxer \
-            redoxer exec -f /mnt -- sh -c 'ls -la /root; chmod +x /root/redoxhello.bin; /root/redoxhello.bin' 2>&1 | tee /tmp/redoxer-exec.log
+            redoxer exec -f /mnt -- /root/mnt/redoxhello.bin 2>&1 | tee /tmp/redoxer-exec.log
 
       # Control: with -f the previous step got as far as "redoxerd: Failed
       # to spawn ... /root/redoxhello.bin" -- the VM found and tried to exec
