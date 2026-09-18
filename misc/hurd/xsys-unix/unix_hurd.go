@@ -59,6 +59,14 @@ const (
 	TCSETA  = 0x5406
 )
 
+// access(2) modes (unistd.h; identical in glibc for Hurd).
+const (
+	F_OK = 0
+	X_OK = 1
+	W_OK = 2
+	R_OK = 4
+)
+
 const (
 	tcsaNow   = 0
 	tcsaDrain = 1
