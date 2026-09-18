@@ -171,6 +171,8 @@ func getPageSize() uintptr {
 
 func osinit() {
 	println("DEBUG osinit: start")
+	pid := sysvicall0(&libc_getpid)
+	println("DEBUG osinit: getpid via sysvicall0 =", pid)
 	// Call miniterrno so that we can safely make system calls
 	// before calling minit on m0.
 	asmcgocall(unsafe.Pointer(abi.FuncPCABI0(miniterrno)), unsafe.Pointer(&libc__errnop))
