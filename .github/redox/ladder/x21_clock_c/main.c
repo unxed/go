@@ -1,25 +1,29 @@
-/* Kernel-level clock check without Go: (1) does nanosleep/usleep ever return
- * early; (2) do CLOCK_MONOTONIC readings taken on different threads go backwards
- * (per-CPU clock skew)? Also prints CLOCK_REALTIME skew the same way. */
+/* Kernel-level clock check without Go: (1) does nanosleep ever return early;
+ * (2) do clock readings taken on different threads, strictly ordered by a
+ * handshake, ever go backwards (per-CPU clock skew)? Checked for both
+ * CLOCK_MONOTONIC and CLOCK_REALTIME. */
 #include <pthread.h>
-#include <stdio.h>
+#include <sched.h>
 #include <stdatomic.h>
+#include <stdio.h>
 #include <time.h>
 #include <unistd.h>
 
 static long long ns(clockid_t c) { struct timespec t; clock_gettime(c, &t); return t.tv_sec * 1000000000LL + t.tv_nsec; }
-static _Atomic long long shared[2];
-static long long neg[2], worst[2];
-#define N 300000
 
-static void *other(void *p) {
-    clockid_t c = (clockid_t)(long)p; int k = c == CLOCK_MONOTONIC ? 0 : 1;
-    long long last = 0;
-    for (int i = 0; i < N; i++) {
-        while (atomic_load(&shared[k]) == last) {}
-        last = atomic_load(&shared[k]);
-        long long now = ns(c);
-        if (now < last) { neg[k]++; if (last - now > worst[k]) worst[k] = last - now; }
+static clockid_t clk;
+static _Atomic long long tsA, tsB;
+static _Atomic int seq, ack;
+static long long neg, worst;
+#define N 4000
+
+static void *reader(void *p) {
+    for (int i = 1; i <= N; i++) {
+        while (atomic_load(&seq) != i) sched_yield();
+        long long t = ns(clk), a = atomic_load(&tsA);
+        if (t < a) { neg++; if (a - t > worst) worst = a - t; }
+        atomic_store(&tsB, t);
+        atomic_store(&ack, i);
     }
     return 0;
 }
@@ -36,16 +40,20 @@ int main(void) {
     }
     printf("nanosleep(5ms) x100: %d early, min %lld ns\n", early, minel);
     for (int k = 0; k < 2; k++) {
-        clockid_t c = k == 0 ? CLOCK_MONOTONIC : CLOCK_REALTIME;
-        pthread_t t; pthread_create(&t, 0, other, (void *)(long)c);
+        clk = k == 0 ? CLOCK_MONOTONIC : CLOCK_REALTIME;
+        neg = worst = 0; atomic_store(&seq, 0); atomic_store(&ack, 0);
+        pthread_t t; pthread_create(&t, 0, reader, 0);
+        long long neg2 = 0, worst2 = 0;
         for (int i = 1; i <= N; i++) {
-            atomic_store(&shared[k], ns(c));
-            usleep(0); sched_yield();
-            /* wait until the reader consumed: it reads then waits for the next change */
-            long long v = atomic_load(&shared[k]); (void)v;
+            atomic_store(&tsA, ns(clk));
+            atomic_store(&seq, i);
+            while (atomic_load(&ack) != i) sched_yield();
+            long long t2 = ns(clk), b = atomic_load(&tsB);
+            if (t2 < b) { neg2++; if (b - t2 > worst2) worst2 = b - t2; }
         }
         pthread_join(t, 0);
-        printf("%s cross-thread: %lld backwards steps, worst %lld ns\n", k == 0 ? "MONOTONIC" : "REALTIME", neg[k], worst[k]);
+        printf("%s across threads (%d handshakes): A->B backwards %lld (worst %lld ns), B->A backwards %lld (worst %lld ns)\n",
+               k == 0 ? "MONOTONIC" : "REALTIME", N, neg, worst, neg2, worst2);
     }
     printf("OK x21_clock_c\n");
     _exit(0);

@@ -1,5 +1,5 @@
-// Diagnostic for p11's "Sleep(20ms) returned after 17.7ms": is it the runtime's
-// timers or a clock that disagrees between CPUs/threads?
+// Diagnostic for p11's one-off "Sleep(20ms) returned after 17.7ms": timers vs a
+// clock that disagrees between threads.
 package main
 
 import (
@@ -9,12 +9,13 @@ import (
 	"time"
 )
 
+var start = time.Now()
+
+func now() int64 { return int64(time.Since(start)) }
+
 func main() {
-	// 1. sleeps: elapsed must never be shorter than requested
-	for _, procs := range []int{0, 1} {
-		if procs > 0 {
-			runtime.GOMAXPROCS(procs)
-		}
+	for _, procs := range []int{2, 1} {
+		runtime.GOMAXPROCS(procs)
 		short, n := 0, 100
 		var minEl, maxEl time.Duration = time.Hour, 0
 		for i := 0; i < n; i++ {
@@ -24,48 +25,49 @@ func main() {
 			if el < 5*time.Millisecond {
 				short++
 			}
-			if el < minEl {
-				minEl = el
-			}
-			if el > maxEl {
-				maxEl = el
-			}
+			minEl, maxEl = min(minEl, el), max(maxEl, el)
 		}
-		fmt.Printf("sleep(5ms) x%d GOMAXPROCS=%d: %d too short; min %v max %v\n", n, runtime.GOMAXPROCS(0), short, minEl, maxEl)
+		fmt.Printf("sleep(5ms) x%d GOMAXPROCS=%d: %d too short; min %v max %v\n", n, procs, short, minEl, maxEl)
 	}
-	// 2. does the monotonic clock go backwards across threads? two locked threads ping-pong timestamps
-	var shared atomic.Int64
+	runtime.GOMAXPROCS(2)
+	// Two OS-thread-locked goroutines alternate strictly via a handshake; every
+	// reading must be >= the previous one although they are taken on different threads.
+	const N = 4000
+	var seq, ack atomic.Int64
+	var tsA, tsB atomic.Int64
+	var negAB, negBA int
+	var worstAB, worstBA int64
 	done := make(chan struct{})
-	neg, maxNeg := 0, int64(0)
 	go func() {
 		runtime.LockOSThread()
-		last := int64(0)
-		for i := 0; i < 200000; i++ {
-			for shared.Load() == last {
+		for i := int64(1); i <= N; i++ {
+			for seq.Load() != i {
+				runtime.Gosched()
 			}
-			last = shared.Load()
-			now := int64(time.Since(start))
-			if now < last {
-				neg++
-				if last-now > maxNeg {
-					maxNeg = last - now
-				}
+			t := now()
+			if a := tsA.Load(); t < a {
+				negAB++
+				worstAB = max(worstAB, a-t)
 			}
+			tsB.Store(t)
+			ack.Store(i)
 		}
 		close(done)
 	}()
 	runtime.LockOSThread()
-	for i := 1; i <= 200000; i++ {
-		shared.Store(int64(time.Since(start)) + int64(i&0)) // ping
-		select {
-		case <-done:
-			i = 1 << 30
-		default:
+	for i := int64(1); i <= N; i++ {
+		tsA.Store(now())
+		seq.Store(i)
+		for ack.Load() != i {
+			runtime.Gosched()
 		}
-		runtime.Gosched()
+		t := now()
+		if b := tsB.Load(); t < b {
+			negBA++
+			worstBA = max(worstBA, b-t)
+		}
 	}
-	fmt.Printf("cross-thread monotonic: %d backwards steps, worst %dns\n", neg, maxNeg)
+	<-done
+	fmt.Printf("cross-thread monotonic (%d handshakes): A->B backwards %d (worst %dns), B->A backwards %d (worst %dns)\n", N, negAB, worstAB, negBA, worstBA)
 	fmt.Println("OK x19_clock")
 }
-
-var start = time.Now()

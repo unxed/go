@@ -151,6 +151,7 @@ jobs:
               echo "$n TESTBUILD_FAIL"; head -40 /tmp/pkgt/test-build-$n.log
             fi
           done
+          mkdir -p /tmp/pkgt/out/lib/time && cp lib/time/zoneinfo.zip /tmp/pkgt/out/lib/time/   # time tests load ../../lib/time/zoneinfo.zip
           cp .github/redox/run_common.sh /tmp/pkgt/out/common.sh
           cp .github/redox/run_tests.sh /tmp/pkgt/out/
           du -sh /tmp/pkgt/out; ls -la /tmp/pkgt/out
@@ -171,54 +172,100 @@ jobs:
           path: /tmp/pkg
           if-no-files-found: warn
 
-  # The VM jobs run in parallel, each with its own QEMU boot (TCG, no KVM), so a
-  # round stays short.
+  # The exit hang is a kernel bug (see .github/redox/kernel/): a thread that
+  # procmgr ForceKills while it is about to block is never woken. So every VM job
+  # runs twice: on the stock kernel of redoxer's image, and on the same kernel
+  # source with .github/redox/kernel/forcekill-lost-wakeup.patch applied.
+  kernel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      KERNEL_SHA: 2d2eef740a461bb6f60eff9cbe6a4a54168ce0b5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the patched Redox kernel
+        timeout-minutes: 6
+        run: |
+          sudo apt-get install -y -qq nasm >/dev/null
+          rustup toolchain install nightly-2026-05-24 --profile minimal -c rust-src 2>&1 | tail -2
+          mkdir /tmp/kernel-src && cd /tmp/kernel-src
+          git init -q . && git remote add origin https://gitlab.redox-os.org/redox-os/kernel.git
+          git fetch -q --depth 1 origin $KERNEL_SHA && git checkout -q FETCH_HEAD
+          git apply $GITHUB_WORKSPACE/.github/redox/kernel/forcekill-lost-wakeup.patch
+          make ARCH=x86_64 OBJCOPY=objcopy BUILD=/tmp/kbuild all 2>&1 | tail -5
+          ls -la /tmp/kbuild/kernel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: redox-kernel-patched
+          path: /tmp/kbuild/kernel
+
+  # The VM jobs run in parallel, each with its own QEMU boot (TCG, no KVM).
   vm-ladder:
-    needs: build
+    needs: [build, kernel]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        kernel: [stock, patched]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: redox-cross-build-output
           path: /tmp/pkg
-      - name: Run the ladder under redoxer
+      - uses: actions/download-artifact@v4
+        if: matrix.kernel == 'patched'
+        with:
+          name: redox-kernel-patched
+          path: /tmp/kpatched
+      - name: Run the ladder under redoxer (${{ matrix.kernel }} kernel)
         continue-on-error: true
         timeout-minutes: 6
         run: |
           chmod +x /tmp/pkg/out/*.bin
-          .github/redox/vm_run.sh run_ladder.sh /tmp/redoxer-exec.log
+          k=""; [ "${{ matrix.kernel }}" = patched ] && k=/tmp/kpatched/kernel
+          .github/redox/vm_run.sh run_ladder.sh /tmp/redoxer-exec.log $k
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: redoxer-exec-output
+          name: redoxer-exec-output-${{ matrix.kernel }}
           path: /tmp/redoxer-exec.log
           if-no-files-found: ignore
-      - name: Ladder summary (fails unless every gating rung passed)
+      - name: Ladder summary (${{ matrix.kernel }} kernel; fails unless every gating rung passed)
         if: always()
         run: python3 .github/redox/ladder_summary.py /tmp/redoxer-exec.log main
 
   vm-exit:
-    needs: build
+    needs: [build, kernel]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        kernel: [stock, patched]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: redox-cross-build-output
           path: /tmp/pkg
-      - name: Run the exit-hang probes under redoxer
+      - uses: actions/download-artifact@v4
+        if: matrix.kernel == 'patched'
+        with:
+          name: redox-kernel-patched
+          path: /tmp/kpatched
+      - name: Run the exit-hang probes under redoxer (${{ matrix.kernel }} kernel)
         continue-on-error: true
         timeout-minutes: 6
         run: |
           chmod +x /tmp/pkg/out/*.bin
-          .github/redox/vm_run.sh run_exit.sh /tmp/redoxer-exit.log
+          k=""; [ "${{ matrix.kernel }}" = patched ] && k=/tmp/kpatched/kernel
+          .github/redox/vm_run.sh run_exit.sh /tmp/redoxer-exit.log $k
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: redoxer-exit-output
+          name: redoxer-exit-output-${{ matrix.kernel }}
           path: /tmp/redoxer-exit.log
           if-no-files-found: ignore
       - name: Exit-probe summary (diagnostic; never fails the job)
@@ -226,27 +273,37 @@ jobs:
         run: python3 .github/redox/ladder_summary.py /tmp/redoxer-exit.log exit || true
 
   vm-tests:
-    needs: build
+    needs: [build, kernel]
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        kernel: [stock, patched]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: redox-std-tests
           path: /tmp/pkgt
-      - name: Run the std test binaries under redoxer
+      - uses: actions/download-artifact@v4
+        if: matrix.kernel == 'patched'
+        with:
+          name: redox-kernel-patched
+          path: /tmp/kpatched
+      - name: Run the std test binaries under redoxer (${{ matrix.kernel }} kernel)
         continue-on-error: true
         timeout-minutes: 8
         run: |
           chmod +x /tmp/pkgt/out/*.test
-          PKGOUT=/tmp/pkgt/out .github/redox/vm_run.sh run_tests.sh /tmp/redoxer-tests.log
+          k=""; [ "${{ matrix.kernel }}" = patched ] && k=/tmp/kpatched/kernel
+          PKGOUT=/tmp/pkgt/out .github/redox/vm_run.sh run_tests.sh /tmp/redoxer-tests.log $k
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: redoxer-tests-output
+          name: redoxer-tests-output-${{ matrix.kernel }}
           path: /tmp/redoxer-tests.log
           if-no-files-found: ignore
-      - name: Per-package results
+      - name: Per-package results (${{ matrix.kernel }} kernel)
         if: always()
         run: python3 .github/redox/test_summary.py /tmp/redoxer-tests.log

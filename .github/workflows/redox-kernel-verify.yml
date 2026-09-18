@@ -65,7 +65,7 @@ jobs:
         run: |
           k=""
           [ "${{ matrix.variant }}" != stock ] && k=/tmp/kbuild/kernel
-          .github/redox/kernel/vm_run_kernel.sh run_kernel_ab.sh /tmp/kab.log $k
+          .github/redox/vm_run.sh run_kernel_ab.sh /tmp/kab.log $k
 
       - uses: actions/upload-artifact@v4
         if: always()
