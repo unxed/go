@@ -30,6 +30,7 @@ package runtime
 
 const (
 	_EINTR     = 0x4
+	_EBADF     = 0x9
 	_EFAULT    = 0xe
 	_EAGAIN    = 0xb
 	_ENOMEM    = 0xc

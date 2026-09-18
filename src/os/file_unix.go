@@ -164,13 +164,15 @@ func newFile(fd int, name string, kind newFileKind, nonBlocking bool) *File {
 	// perform this check and allow it to be added to the kqueue.
 	if kind == kindOpenFile {
 		switch runtime.GOOS {
-		case "darwin", "ios", "dragonfly", "freebsd", "netbsd", "openbsd":
+		case "darwin", "ios", "dragonfly", "freebsd", "netbsd", "openbsd", "redox":
 			var st syscall.Stat_t
 			err := ignoringEINTR(func() error {
 				return syscall.Fstat(fd, &st)
 			})
 			typ := st.Mode & syscall.S_IFMT
 			// Don't try to use kqueue with regular files on *BSDs.
+			// On Redox, relibc's poll fails the whole call (EPERM) when it
+			// is given a file it cannot watch.
 			// On FreeBSD a regular file is always
 			// reported as ready for writing.
 			// On Dragonfly, NetBSD and OpenBSD the fd is signaled

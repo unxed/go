@@ -36,6 +36,7 @@ const _POLLIN = 0x0001
 const _POLLOUT = 0x0004
 const _POLLHUP = 0x0010
 const _POLLERR = 0x0008
+const _POLLNVAL = 0x0020
 
 var (
 	pfds           []pollfd
@@ -83,6 +84,19 @@ func netpollwakeup() {
 }
 
 func netpollopen(fd uintptr, pd *pollDesc) int32 {
+	// relibc implements poll on top of its event queue and fails the WHOLE call
+	// (EPERM) as soon as one descriptor cannot be watched, e.g. a regular file
+	// opened with os.OpenFile; netpoll would then throw "poll failed" on every
+	// later wait. Probe the descriptor first and refuse it: package os then
+	// keeps it in blocking mode.
+	var probe pollfd
+	probe.fd = int32(fd)
+	if n, e := poll(&probe, 1, 0); n < 0 {
+		return int32(e)
+	} else if n > 0 && probe.revents&_POLLNVAL != 0 {
+		return _EBADF
+	}
+
 	lock(&mtxpoll)
 	netpollwakeup()
 
