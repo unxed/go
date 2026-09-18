@@ -1,6 +1,14 @@
 name: hurd-cross-build
 
 on:
+  push:
+    branches: [golang-1.26-hurd]
+    paths:
+      - '.github/workflows/hurd-cross-build.yml'
+      - 'src/runtime/**'
+      - 'src/internal/platform/zosarch.go'
+      - 'src/cmd/dist/build.go'
+      - 'src/cmd/go/internal/work/**'
   workflow_dispatch: {}
 
 permissions:
