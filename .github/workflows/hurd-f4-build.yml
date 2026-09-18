@@ -1,0 +1,62 @@
+name: hurd-f4-build
+
+# Cross-compile unxed/f4 for GOOS=hurd with the toolchain built from this branch.
+on:
+  workflow_dispatch:
+    inputs:
+      f4_ref:
+        description: 'unxed/f4 ref (branch, tag or SHA)'
+        default: 'main'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build host toolchain
+        working-directory: src
+        run: |
+          export GOROOT_BOOTSTRAP=$(dirname $(dirname $(which go)))
+          ./make.bash
+
+      - name: Fetch f4
+        run: |
+          git clone --filter=blob:none https://github.com/unxed/f4 /tmp/f4
+          cd /tmp/f4
+          git checkout "${{ inputs.f4_ref }}"
+          git log --oneline -1
+
+      - name: Compile f4 for GOOS=hurd
+        run: |
+          export GOROOT=$(pwd)
+          export PATH=$GOROOT/bin:$PATH
+          export GOTOOLCHAIN=local GOFLAGS=-mod=mod
+          go version
+          cd /tmp/f4
+          mkdir -p /tmp/out
+          export GOOS=hurd GOARCH=amd64 CGO_ENABLED=0
+          go list -deps ./cmd/f4 > /tmp/out/deps.txt 2> /tmp/out/deps.err || true
+          echo "deps: $(wc -l < /tmp/out/deps.txt)"; head -30 /tmp/out/deps.err
+          go build -gcflags=-e ./... > /tmp/out/build-all.log 2>&1 || true
+          grep -c '^#' /tmp/out/build-all.log | sed 's/^/packages with errors: /'
+          head -120 /tmp/out/build-all.log
+          go build -o /tmp/out/f4.bin ./cmd/f4 > /tmp/out/build-f4.log 2>&1
+          echo "F4_RC=$?" | tee -a "$GITHUB_ENV"
+          head -60 /tmp/out/build-f4.log
+          ls -l /tmp/out
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hurd-f4-output
+          path: /tmp/out
+          if-no-files-found: warn
