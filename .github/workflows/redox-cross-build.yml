@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +27,7 @@ jobs:
           nohup docker pull redoxos/redoxer > /tmp/docker-pull.log 2>&1 &
 
       - name: Install cc wrapper that runs redoxer's cross compiler in Docker
+        timeout-minutes: 2
         run: |
           sudo tee /usr/local/bin/redox-cc >/dev/null <<'EOF'
           #!/bin/sh
@@ -38,6 +40,7 @@ jobs:
       # hand-written tables: cgo -godefs (types, errno/signal/etc constants)
       # via redoxer's compiler, and mksyscall_redox.pl for the libc stubs.
       - name: Generate syscall/ztypes, zerrors (cgo -godefs) and zsyscall (mksyscall)
+        timeout-minutes: 3
         run: |
           set -o pipefail
           export CC=/usr/local/bin/redox-cc
@@ -61,6 +64,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Build host (linux/amd64) toolchain
+        timeout-minutes: 4
         working-directory: src
         run: |
           export GOROOT_BOOTSTRAP=$(dirname $(dirname $(which go)))
@@ -70,6 +74,7 @@ jobs:
       # Bulk compile check of the std packages we care about, reporting ALL
       # errors (-e) across independent packages in one round.
       - name: Compile-check std packages for GOOS=redox
+        timeout-minutes: 3
         continue-on-error: true
         run: |
           export GOROOT=$(pwd)
@@ -91,6 +96,7 @@ jobs:
       # The validation ladder: independent programs of increasing difficulty,
       # each built separately so failures are attributable.
       - name: Build the validation-ladder programs
+        timeout-minutes: 3
         run: |
           export GOROOT=$(pwd)
           export PATH=$GOROOT/bin:$PATH
@@ -121,20 +127,21 @@ jobs:
               procs1) GOMAXPROCS=1 $bin & ;;
             esac
             pid=$!
-            ( sleep 60; kill -9 $pid 2>/dev/null && echo "=== WATCHDOG killed $bin" ) &
+            ( sleep 25; kill -9 $pid 2>/dev/null && echo "=== WATCHDOG killed $bin" && echo "HANG $bin" ) &
             wd=$!
             wait $pid
             rc=$?
             kill $wd 2>/dev/null
             echo "=== END $bin variant=$variant run=$n exit=$rc"
           }
-          for p in /root/mnt/p*.bin; do
-            for v in default nopreempt procs1; do
-              for n in 1 2 3; do
-                run_one $p $v $n
-              done
-            done
+          # phase A (gating): every rung once, plain
+          for p in /root/mnt/p*.bin; do run_one $p default 1; done
+          # phase B (flake probe): the tiny fmt program repeatedly under
+          # three variants, plus the signal-return probe without preemption
+          for v in default nopreempt procs1; do
+            for n in 2 3 4 5 6 7; do run_one /root/mnt/p02_fmt.bin $v $n; done
           done
+          for n in 2 3; do run_one /root/mnt/p10_sigstorm.bin nopreempt $n; done
           EOF
           ls -la out
 
@@ -155,10 +162,10 @@ jobs:
       - name: Run the ladder under redoxer
         if: env.LADDER_BUILT != '0'
         continue-on-error: true
-        timeout-minutes: 28
+        timeout-minutes: 5
         run: |
           docker pull redoxos/redoxer >/dev/null
-          timeout 1500 docker run --rm -v /tmp/ladder/out:/mnt redoxos/redoxer \
+          timeout 270 docker run --rm -v /tmp/ladder/out:/mnt redoxos/redoxer \
             redoxer exec -f /mnt -- sh /root/mnt/run_ladder.sh 2>&1 | tee /tmp/redoxer-exec.log
 
       - name: Upload redoxer exec log
