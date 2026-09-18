@@ -358,7 +358,11 @@ func doSigPreempt(gp *g, ctxt *sigctxt) {
 	}
 }
 
-const preemptMSupported = true
+// Asynchronous preemption is disabled on Hurd: glibc Hurd delivers signals to
+// a thread through its signal server, and Go's SIGURG-based preemption then
+// intermittently corrupts the interrupted thread (see signal_hurd_amd64.go and
+// STATUS-HURD.md). Synchronous faults (sigpanic) are unaffected.
+const preemptMSupported = GOOS != "hurd"
 
 // preemptM sends a preemption request to mp. This request may be
 // handled asynchronously and may be coalesced with other requests to
