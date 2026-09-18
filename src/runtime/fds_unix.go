@@ -27,6 +27,12 @@ func checkfds() {
 		EBADF   = int32(0x7fffa000)
 	}
 
+	if GOOS == "redox" {
+		// relibc's O_RDWR is a distinct bit pattern (bits_open-flags/redox.rs:
+		// O_RDWR = 0x0003_0000), not the small integer most other unixes use.
+		O_RDWR = 0x00030000
+	}
+
 	devNull := []byte("/dev/null\x00")
 	for i := 0; i < 3; i++ {
 		ret, errno := fcntl(int32(i), F_GETFD, 0)
