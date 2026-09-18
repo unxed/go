@@ -1,12 +1,14 @@
 name: hurd-f4-build
 
 # Cross-compile unxed/f4 for GOOS=hurd with the toolchain built from this branch.
+# workflow_dispatch only works for workflows on the default branch (haiku here),
+# so it is triggered by pushing a change to .github/f4-ref (the unxed/f4 ref to build).
 on:
-  workflow_dispatch:
-    inputs:
-      f4_ref:
-        description: 'unxed/f4 ref (branch, tag or SHA)'
-        default: 'main'
+  push:
+    branches: [golang-1.26-hurd]
+    paths:
+      - '.github/f4-ref'
+      - '.github/workflows/hurd-f4-build.yml'
 
 permissions:
   contents: read
@@ -31,7 +33,7 @@ jobs:
         run: |
           git clone --filter=blob:none https://github.com/unxed/f4 /tmp/f4
           cd /tmp/f4
-          git checkout "${{ inputs.f4_ref }}"
+          git checkout "$(cat "$GITHUB_WORKSPACE/.github/f4-ref" | tr -d '[:space:]')"
           git log --oneline -1
 
       - name: Compile f4 for GOOS=hurd
