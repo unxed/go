@@ -17,10 +17,14 @@ func (iov *Iovec) SetLen(length int) {
 }
 
 func (cmsg *Cmsghdr) SetLen(length int) {
-	cmsg.Len = uint32(length)
+	cmsg.Len = uint64(length)
 }
 
 // TODO, see golang.org/issue/5847
 func sendfile(outfd int, infd int, offset *int64, count int) (written int, err error) {
 	return -1, ENOSYS
 }
+
+// Never used at run time (execve goes through libc, see execveLibc), but
+// exec_unix.go's default branch mentions it.
+const SYS_EXECVE = 59

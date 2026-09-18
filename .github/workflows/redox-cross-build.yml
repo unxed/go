@@ -110,6 +110,7 @@ jobs:
             fi
           done
           cat /tmp/ladder-build.txt
+          echo "LADDER_BUILT=$(grep -c BUILD_OK /tmp/ladder-build.txt)" >> "$GITHUB_ENV"
           cat > out/run_ladder.sh <<'EOF'
           for p in /root/mnt/p*.bin; do
             echo "=== BEGIN $p"
@@ -134,6 +135,7 @@ jobs:
       # runners, so a boot is TCG-slow, ~1 min). `-f /mnt` copies the host
       # folder into the VM as /root/mnt/.
       - name: Run the ladder under redoxer
+        if: env.LADDER_BUILT != '0'
         continue-on-error: true
         timeout-minutes: 12
         run: |

@@ -395,8 +395,8 @@ func recvmsgRaw(fd int, p, oob []byte, flags int, rsa *RawSockaddrAny) (n, oobn 
 			iov.Base = &dummy
 			iov.SetLen(1)
 		}
-		msg.Control = (*int8)(unsafe.Pointer(&oob[0]))
-		msg.Controllen = uint32(len(oob))
+		msg.Control = (*byte)(unsafe.Pointer(&oob[0]))
+		msg.Controllen = uint64(len(oob))
 	}
 	msg.Iov = &iov
 	msg.Iovlen = 1
@@ -424,8 +424,8 @@ func sendmsgN(fd int, p, oob []byte, ptr unsafe.Pointer, salen _Socklen, flags i
 			iov.Base = &dummy
 			iov.SetLen(1)
 		}
-		msg.Control = (*int8)(unsafe.Pointer(&oob[0]))
-		msg.Controllen = uint32(len(oob))
+		msg.Control = (*byte)(unsafe.Pointer(&oob[0]))
+		msg.Controllen = uint64(len(oob))
 	}
 	msg.Iov = &iov
 	msg.Iovlen = 1
@@ -553,3 +553,11 @@ func Mmap(fd int, offset int64, length int, prot int, flags int) (data []byte, e
 func Munmap(b []byte) (err error) {
 	return mapper.Munmap(b)
 }
+
+// relibc has no netinet/icmp6.h, so ICMPv6Filter (Linux/BSD layout: eight
+// 32-bit words) is declared by hand rather than generated.
+type ICMPv6Filter struct {
+	Data [8]uint32
+}
+
+const SizeofICMPv6Filter = 0x20
