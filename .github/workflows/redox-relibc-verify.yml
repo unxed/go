@@ -137,7 +137,8 @@ jobs:
             d=$(find art/relibc-$v -type d -name $v | head -1)
             [ -n "$d" ] && cp -r "$d" vm/$v || echo "no libc for $v"
           done
-          chmod +x vm/bins/*.bin
+          # artifacts lose the exec bit; the kernel needs the interpreter (libc.so as ld64.so.1) executable too
+          chmod +x vm/bins/*.bin vm/unpatched/* vm/patched/*
           cat > vm/run.sh <<'EOF'
           run_one() {
             v="$1"; prog="$2"; n="$3"
