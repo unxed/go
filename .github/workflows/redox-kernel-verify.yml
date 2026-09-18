@@ -1,0 +1,92 @@
+name: redox-kernel-verify
+
+# A/B verification of a kernel patch for the "process never exits" hang
+# (ForceKill of a thread that is on its way to sleep is lost). Variants:
+#   stock     the kernel shipped in redoxer's image, untouched
+#   baseline  Redox kernel master, built here, unpatched
+#   patched   the same source + .github/redox/kernel/forcekill-lost-wakeup.patch
+# Each boots under redoxer and runs the pure-C reproducer x17 (no Go involved).
+on:
+  push:
+    branches: [golang-1.26-redox]
+    paths: ['.github/redox/kernel/**', '.github/workflows/redox-kernel-verify.yml']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  KERNEL_SHA: 2d2eef740a461bb6f60eff9cbe6a4a54168ce0b5
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [stock, baseline, patched]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the kernel (${{ matrix.variant }})
+        if: matrix.variant != 'stock'
+        timeout-minutes: 6
+        run: |
+          rustup toolchain install nightly-2026-05-24 --profile minimal -c rust-src 2>&1 | tail -3
+          mkdir /tmp/kernel-src && cd /tmp/kernel-src
+          git init -q . && git remote add origin https://gitlab.redox-os.org/redox-os/kernel.git
+          git fetch -q --depth 1 origin $KERNEL_SHA && git checkout -q FETCH_HEAD
+          git log --oneline -1
+          if [ "${{ matrix.variant }}" = patched ]; then
+            git apply --check $GITHUB_WORKSPACE/.github/redox/kernel/forcekill-lost-wakeup.patch
+            git apply $GITHUB_WORKSPACE/.github/redox/kernel/forcekill-lost-wakeup.patch
+            git diff --stat
+          fi
+          make ARCH=x86_64 OBJCOPY=objcopy BUILD=/tmp/kbuild all 2>&1 | tail -15
+          ls -la /tmp/kbuild/kernel && sha1sum /tmp/kbuild/kernel
+
+      - name: Build the C reproducer with redoxer's compiler
+        timeout-minutes: 3
+        run: |
+          mkdir -p /tmp/pkg/out
+          docker pull redoxos/redoxer >/dev/null
+          docker run --rm -v /tmp:/tmp -w /tmp redoxos/redoxer redoxer cc -O1 -pthread \
+            -o /tmp/pkg/out/x17_exit_c.bin $GITHUB_WORKSPACE/.github/redox/ladder/x17_exit_c/main.c
+          chmod +x /tmp/pkg/out/x17_exit_c.bin
+          cp $GITHUB_WORKSPACE/.github/redox/run_common.sh /tmp/pkg/out/common.sh
+          cp $GITHUB_WORKSPACE/.github/redox/kernel/run_kernel_ab.sh /tmp/pkg/out/
+
+      - name: Boot and run x17 (${{ matrix.variant }})
+        timeout-minutes: 8
+        continue-on-error: true
+        run: |
+          k=""
+          [ "${{ matrix.variant }}" != stock ] && k=/tmp/kbuild/kernel
+          .github/redox/kernel/vm_run_kernel.sh run_kernel_ab.sh /tmp/kab.log $k
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kernel-ab-${{ matrix.variant }}
+          path: |
+            /tmp/kab.log
+            /tmp/kbuild/kernel
+          if-no-files-found: ignore
+
+      - name: Tally
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import re, collections, os
+          t = open('/tmp/kab.log', errors='replace').read().replace('\r', '')
+          c = collections.defaultdict(lambda: [0, 0])
+          for m in re.finditer(r"=== BEGIN \S*?/(\w+)\.bin variant=(\w+) run=\d+\n(.*?)=== END", t, re.S):
+              k = (m.group(1), m.group(2)); c[k][0] += 1
+              if 'HANG' in m.group(3): c[k][1] += 1
+          lines = [f"variant=${{ matrix.variant }} {k[0]}/{k[1]}: {v[0]} runs, {v[1]} hangs" for k, v in c.items()]
+          if 'VM FROZE' in t: lines.append('VM FROZE during the probe')
+          out = "\n".join(lines) or "no runs recorded"
+          print(out)
+          open(os.environ['GITHUB_STEP_SUMMARY'], 'a').write("### kernel A/B\n```\n" + out + "\n```\n")
+          PY
