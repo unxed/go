@@ -11,6 +11,11 @@ set -x
 cd /src
 export TARGET=x86_64-unknown-redox
 date
+# `make libs` also generates the C headers with cbindgen (not in the image)
+cargo install cbindgen --locked --root /opt/cbindgen > /src/cbindgen-install.log 2>&1 || { tail -30 /src/cbindgen-install.log; exit 1; }
+export PATH=/opt/cbindgen/bin:$PATH
+cbindgen --version
+date
 redoxer env sh -c 'echo PATH=$PATH; which x86_64-unknown-redox-gcc; rustc --version; cargo --version; ls "$(rustc --print sysroot)/lib/rustlib" "$(rustc --print sysroot)/lib/rustlib/src" 2>&1 | head; nproc; free -m'
 if redoxer env make -j2 PROFILE=release libs > /src/build1.log 2>&1; then
   echo "=== relibc built with the redoxer toolchain"

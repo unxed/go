@@ -80,6 +80,7 @@ jobs:
             build-${{ matrix.variant }}.log
             relibc/build1.log
             relibc/build2.log
+            relibc/cbindgen-install.log
           if-no-files-found: warn
 
   go-bins:
