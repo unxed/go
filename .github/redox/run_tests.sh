@@ -27,6 +27,15 @@ run_test() {
   grep -- '--- ' /tmp/$n.out
   echo "--- failures (any level) of $n"
   grep -- '--- FAIL' /tmp/$n.out
+  echo "--- details of failing tests of $n (re-run one by one)"
+  k=0
+  grep -- '--- FAIL' /tmp/$n.out | while read a b name rest; do
+    k=$((k+1))
+    if [ $k -le 3 ]; then
+      echo "### $name"
+      ( cd /root/mnt/data/$n; /root/mnt/$n.test -test.v -test.short -test.timeout=20s -test.run "^${name}\$" 2>&1 | tail -25 )
+    fi
+  done
   echo "--- tail of $n"
   if [ "$rc" = 0 ]; then tail -3 /tmp/$n.out; else tail -70 /tmp/$n.out; fi
   echo "=== END /root/mnt/$label.test variant=test run=1 exit=$rc after=${t}s"

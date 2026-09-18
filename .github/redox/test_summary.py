@@ -4,6 +4,7 @@ import os, re, sys
 
 log = open(sys.argv[1], errors="replace").read().replace("\r", "") if os.path.exists(sys.argv[1]) else ""
 rows = []
+details = []
 for m in re.finditer(r"=== BEGIN /root/mnt/(\w+)\.test variant=test run=1\n(.*?)=== END \S+ variant=test run=1 exit=(\S+) after=(\d+)s", log, re.S):
     name, body, rc, secs = m.groups()
     top = re.search(r"--- top-level results of \w+\n(.*?)--- failures", body, re.S)
@@ -11,8 +12,11 @@ for m in re.finditer(r"=== BEGIN /root/mnt/(\w+)\.test variant=test run=1\n(.*?)
     p = len(re.findall(r"^--- PASS", top, re.M))
     f = len(re.findall(r"^--- FAIL", top, re.M))
     s = len(re.findall(r"^--- SKIP", top, re.M))
-    fails = re.search(r"--- failures \(any level\) of \w+\n(.*?)--- tail", body, re.S)
+    fails = re.search(r"--- failures \(any level\) of \w+\n(.*?)--- details", body, re.S)
     fails = [l.strip() for l in fails.group(1).strip().split("\n") if l.strip()] if fails else []
+    det = re.search(r"--- details of failing tests of \w+ \(re-run one by one\)\n(.*?)--- tail", body, re.S)
+    if det and det.group(1).strip():
+        details.append((name, det.group(1).strip()))
     tail = re.search(r"--- tail of \w+\n(.*)", body, re.S)
     tail = [l for l in (tail.group(1).strip().split("\n") if tail else []) if l][-2:]
     rows.append((name, p, f, s, rc, secs, fails[:6], tail))
@@ -23,5 +27,7 @@ if "VM FROZE" in log:
     md.append("\nVM FROZE during the run")
 text = "\n".join(md) if rows else "no test results in the log"
 print(text)
+for name, d in details:
+    print(f"\n#### failing tests of {name}\n{d}")
 if os.environ.get("GITHUB_STEP_SUMMARY"):
-    open(os.environ["GITHUB_STEP_SUMMARY"], "a").write("\n### std package tests on Redox (go test -c, -short)\n\n" + text + "\n")
+    open(os.environ["GITHUB_STEP_SUMMARY"], "a").write("\n### std package tests on Redox (go test -c, -short)\n\n" + text + "\n" + "".join(f"\n<details><summary>failing tests of {n}</summary>\n\n```\n{d}\n```\n</details>\n" for n, d in details))
