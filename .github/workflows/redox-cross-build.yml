@@ -91,12 +91,20 @@ jobs:
           # that VM image via -f/--folder, not just visible to the host
           # container. (First attempt without -f failed: "redoxerd: Failed
           # to spawn ... /root" -- redoxer couldn't find the binary at all.)
-          # "true" (no -f) worked in the smoketest above, but a freshly
-          # folder-copied binary still failed to spawn -- try chmod'ing
-          # INSIDE the VM before exec, in case the copy-in step itself
-          # drops the +x bit regardless of what it was on the host.
+          # "true" (no -f) worked in the smoketest above, but a
+          # folder-copied binary consistently fails, and not even with a
+          # permissions error: chmod itself reports the path doesn't
+          # exist ("chmod: cannot access '/root/redoxhello.bin': No such
+          # file or directory"). So -f/--folder isn't actually placing the
+          # file where redoxer's own path translation believes it does --
+          # this is a redoxer/Docker CI plumbing issue (confirmed generic,
+          # not specific to this port: an equivalent plain-C control binary
+          # fails identically, see the next step), not evidence of a
+          # runtime bug. Left as a known follow-up rather than chased
+          # further here; the primary deliverable -- the cross-compile
+          # itself -- is unaffected and already confirmed working above.
           docker run --rm -v /tmp/redoxhello:/mnt redoxos/redoxer \
-            redoxer exec -f /mnt -- sh -c 'chmod +x /root/redoxhello.bin; /root/redoxhello.bin' 2>&1 | tee /tmp/redoxer-exec.log
+            redoxer exec -f /mnt -- sh -c 'ls -la /root; chmod +x /root/redoxhello.bin; /root/redoxhello.bin' 2>&1 | tee /tmp/redoxer-exec.log
 
       # Control: with -f the previous step got as far as "redoxerd: Failed
       # to spawn ... /root/redoxhello.bin" -- the VM found and tried to exec
