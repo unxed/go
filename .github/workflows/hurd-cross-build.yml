@@ -88,7 +88,7 @@ jobs:
           export GOTOOLCHAIN=local
           mkdir -p /tmp/gotests/out
           cd misc/hurd/tests
-          for t in t_os t_fmt t_fs t_rt t_net t_http t_exec t_sig; do
+          for t in t_os t_fmt t_fs t_rt t_net t_http t_exec t_sig t_panic; do
             GOOS=hurd GOARCH=amd64 CGO_ENABLED=1 go build -o /tmp/gotests/out/$t.bin ./$t > /tmp/gotests/out/$t.build.log 2>&1
             echo "$t: build rc=$?"
             head -40 /tmp/gotests/out/$t.build.log
