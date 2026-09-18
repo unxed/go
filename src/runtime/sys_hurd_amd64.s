@@ -20,7 +20,11 @@ TEXT runtime·settls(SB),NOSPLIT,$8
 // NOT USING GO CALLING CONVENTION.
 TEXT runtime·miniterrno(SB),NOSPLIT,$0
 	// asmcgocall will put first argument into DI.
-	CALL	DI	// SysV ABI so returns in AX
+	// DI holds the address of the libc_xxx dynamic-import symbol slot
+	// (an R_X86_64_GLOB_DAT relocation target); it must be dereferenced
+	// once to get the resolved function pointer before calling it.
+	MOVQ	(DI), AX
+	CALL	AX	// SysV ABI so returns in AX
 	get_tls(CX)
 	MOVQ	g(CX), BX
 	MOVQ	g_m(BX), BX
@@ -65,6 +69,11 @@ skiperrno1:
 	MOVQ	32(R11), R8
 	MOVQ	40(R11), R9
 skipargs:
+
+	// libcall_fn(DI) (loaded into AX above) is the address of the
+	// libc_xxx dynamic-import symbol slot (R_X86_64_GLOB_DAT target),
+	// not the callable address itself -- dereference once.
+	MOVQ	(AX), AX
 
 	// Call SysV function
 	CALL	AX
@@ -293,12 +302,15 @@ usleep1_noswitch:
 
 // Runs on OS stack. duration (in µs units) is in DI.
 TEXT usleep2<>(SB),NOSPLIT,$0
-	LEAQ	libc_usleep(SB), AX
+	// libc_usleep(SB) is an R_X86_64_GLOB_DAT slot; MOVQ loads its
+	// resolved contents (the callable address), unlike LEAQ which would
+	// take the slot's own address.
+	MOVQ	libc_usleep(SB), AX
 	CALL	AX
 	RET
 
 // Runs on OS stack, called from runtime·osyield.
 TEXT runtime·osyield1(SB),NOSPLIT,$0
-	LEAQ	libc_sched_yield(SB), AX
+	MOVQ	libc_sched_yield(SB), AX
 	CALL	AX
 	RET
