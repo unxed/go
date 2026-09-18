@@ -1,7 +1,7 @@
 # Runs the cross-compiled std test binaries (go test -c) inside the Redox VM.
 # Layout: /root/mnt/<pkg>.test and /root/mnt/data/<pkg>/ (testdata, cwd of the run).
 run_test() {
-  n=$1; limit=${2:-100}
+  n=$1; limit=${2:-60}
   echo "=== BEGIN /root/mnt/$n.test variant=test run=1"
   rm -f /tmp/rc.done /tmp/$n.out
   (
@@ -25,10 +25,10 @@ run_test() {
   echo "--- failures (any level) of $n"
   grep -- '--- FAIL' /tmp/$n.out
   echo "--- tail of $n"
-  tail -12 /tmp/$n.out
+  if [ "$rc" = 0 ]; then tail -3 /tmp/$n.out; else tail -70 /tmp/$n.out; fi
   echo "=== END /root/mnt/$n.test variant=test run=1 exit=$rc after=${t}s"
 }
 for n in strings bytes sort container_list encoding_json sync time; do
-  run_test $n 100
+  run_test $n 60
 done
 echo "=== LADDER DONE"

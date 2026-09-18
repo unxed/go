@@ -40,6 +40,7 @@ jobs:
       # hand-written tables: cgo -godefs (types, errno/signal/etc constants)
       # via redoxer's compiler, and mksyscall_redox.pl for the libc stubs.
       - name: Generate syscall/ztypes, zerrors (cgo -godefs) and zsyscall (mksyscall)
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[full]')
         timeout-minutes: 3
         run: |
           set -o pipefail
@@ -53,7 +54,7 @@ jobs:
           git diff --stat -- src/syscall/z*_redox_amd64.go | tee /tmp/gen-drift.txt
 
       - name: Upload generated syscall files
-        if: always()
+        if: (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[full]')) && always()
         uses: actions/upload-artifact@v4
         with:
           name: redox-generated-syscall
@@ -64,7 +65,26 @@ jobs:
             /tmp/gen-syscall.log
           if-no-files-found: warn
 
+      # The toolchain only depends on src/ and VERSION: reuse it across rounds
+      # that change nothing but CI files, tests or docs.
+      - name: Cache the built toolchain (bin, pkg)
+        id: tc
+        uses: actions/cache@v4
+        with:
+          path: |
+            bin
+            pkg
+          key: redox-toolchain-${{ hashFiles('src/**', 'VERSION') }}
+
+      - name: Cache the go build cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: redox-gocache-${{ hashFiles('src/**', 'VERSION') }}
+          restore-keys: redox-gocache-
+
       - name: Build host (linux/amd64) toolchain
+        if: steps.tc.outputs.cache-hit != 'true'
         timeout-minutes: 4
         working-directory: src
         run: |
@@ -75,6 +95,7 @@ jobs:
       # Bulk compile check of the std packages we care about, reporting ALL
       # errors (-e) across independent packages in one round.
       - name: Compile-check std packages for GOOS=redox
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[full]')
         timeout-minutes: 3
         continue-on-error: true
         run: |
@@ -87,7 +108,7 @@ jobs:
           echo "compile-check finished; $(grep -c . /tmp/compile-check.log) lines of output"
 
       - name: Upload compile-check log
-        if: always()
+        if: (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[full]')) && always()
         uses: actions/upload-artifact@v4
         with:
           name: redox-compile-check
@@ -175,7 +196,7 @@ jobs:
   # The exit hang is a kernel bug (see .github/redox/kernel/): a thread that
   # procmgr ForceKills while it is about to block is never woken. So every VM job
   # runs twice: on the stock kernel of redoxer's image, and on the same kernel
-  # source with .github/redox/kernel/forcekill-lost-wakeup.patch applied.
+  # source with .github/redox/kernel/0001-context-never-block-a-force-killed-context.patch applied.
   kernel:
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -191,7 +212,7 @@ jobs:
           mkdir /tmp/kernel-src && cd /tmp/kernel-src
           git init -q . && git remote add origin https://gitlab.redox-os.org/redox-os/kernel.git
           git fetch -q --depth 1 origin $KERNEL_SHA && git checkout -q FETCH_HEAD
-          git apply $GITHUB_WORKSPACE/.github/redox/kernel/forcekill-lost-wakeup.patch
+          git apply $GITHUB_WORKSPACE/.github/redox/kernel/0001-context-never-block-a-force-killed-context.patch
           make ARCH=x86_64 OBJCOPY=objcopy BUILD=/tmp/kbuild all 2>&1 | tail -5
           ls -la /tmp/kbuild/kernel
       - uses: actions/upload-artifact@v4
@@ -219,9 +240,11 @@ jobs:
         with:
           name: redox-kernel-patched
           path: /tmp/kpatched
+      - name: Enable KVM
+        run: .github/redox/enable_kvm.sh
       - name: Run the ladder under redoxer (${{ matrix.kernel }} kernel)
         continue-on-error: true
-        timeout-minutes: 6
+        timeout-minutes: 5
         run: |
           chmod +x /tmp/pkg/out/*.bin
           k=""; [ "${{ matrix.kernel }}" = patched ] && k=/tmp/kpatched/kernel
@@ -255,9 +278,11 @@ jobs:
         with:
           name: redox-kernel-patched
           path: /tmp/kpatched
+      - name: Enable KVM
+        run: .github/redox/enable_kvm.sh
       - name: Run the exit-hang probes under redoxer (${{ matrix.kernel }} kernel)
         continue-on-error: true
-        timeout-minutes: 6
+        timeout-minutes: 5
         run: |
           chmod +x /tmp/pkg/out/*.bin
           k=""; [ "${{ matrix.kernel }}" = patched ] && k=/tmp/kpatched/kernel
@@ -291,6 +316,8 @@ jobs:
         with:
           name: redox-kernel-patched
           path: /tmp/kpatched
+      - name: Enable KVM
+        run: .github/redox/enable_kvm.sh
       - name: Run the std test binaries under redoxer (${{ matrix.kernel }} kernel)
         continue-on-error: true
         timeout-minutes: 8

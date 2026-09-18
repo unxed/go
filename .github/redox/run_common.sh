@@ -1,4 +1,5 @@
 # Sourced by run_ladder.sh / run_exit.sh inside the Redox VM.
+export GOTRACEBACK=all
 # Never `wait` on a possibly wedged process (kill -9 does not always free it
 # on Redox): run it in a background subshell that records its exit code, poll
 # for that, and move on either way. Optional 4th arg: poll limit in seconds.
@@ -18,7 +19,7 @@ run_one() {
   ) &
   sp=$!
   t=0
-  while [ ! -f /tmp/rc.done ] && [ $t -lt ${4:-20} ]; do sleep 1; t=$((t+1)); done
+  while [ ! -f /tmp/rc.done ] && [ $t -lt ${4:-12} ]; do sleep 1; t=$((t+1)); done
   if [ -f /tmp/rc.done ]; then
     rc=`cat /tmp/rc.done`
   else
@@ -32,6 +33,13 @@ run_one() {
     echo "--- full table (first 80 rows)"
     head -80 /scheme/sys/context 2>&1
     echo "---"
+    # Go programs: SIGQUIT makes the runtime print every goroutine's stack
+    set -- `grep "$b" /scheme/sys/context | head -1`
+    if [ -n "$1" ]; then
+      echo "--- SIGQUIT to pid $1"
+      kill -QUIT $1 2>&1
+      sleep 3
+    fi
     kill -9 $sp 2>/dev/null
     rc=hang
   fi

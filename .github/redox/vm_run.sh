@@ -1,15 +1,22 @@
 #!/bin/sh
-# usage: vm_run.sh <script-in-out-dir> <logfile> [kernel-file]   (out dir: $PKGOUT, default /tmp/pkg/out)
-# First lets redoxer build its base image (tar of the
-# installed packages, in ~/.redoxer), then swaps /boot/kernel inside that tar
-# for the given kernel before running the real command.
+# usage: vm_run.sh <script-in-out-dir> <logfile> [kernel-file]
+#   out dir: $PKGOUT (default /tmp/pkg/out), copied by redoxer into the VM as /root/mnt/
+#   env: SMP (default 4), VM_TIMEOUT (default 240 s), VM_IDLE (default 45 s of silence => VM considered frozen)
+# One QEMU boot under redoxer. KVM is used when the host has /dev/kvm (see
+# enable_kvm.sh; redoxer auto-detects it inside the container). With a kernel
+# file, redoxer's base image (a tar of the installed packages in ~/.redoxer) is
+# built first, its usr/lib/boot/kernel is swapped for the given one, then the
+# real command runs.
 script=$1; log=$2; kernel=$3
 docker pull redoxos/redoxer >/dev/null
-: > $log
 kmount=""; [ -n "$kernel" ] && kmount="-v $(dirname $kernel):/kdir"
-( timeout 330 docker run --name ladder --rm -e REDOXER_QEMU_ARGS='-smp 2' -v ${PKGOUT:-/tmp/pkg/out}:/mnt $kmount \
-    redoxos/redoxer sh -c '
+kvmdev=""; [ -e /dev/kvm ] && kvmdev="--device /dev/kvm"
+smp=${SMP:-4}
+echo "vm_run: kvm=${kvmdev:-none} smp=$smp kernel=${kernel:-stock} host-cpus=$(nproc)" | tee $log
+( timeout ${VM_TIMEOUT:-240} docker run --name ladder --rm $kvmdev -e REDOXER_QEMU_ARGS="-smp $smp" \
+    -v ${PKGOUT:-/tmp/pkg/out}:/mnt $kmount redoxos/redoxer sh -c '
   D=/root/.redoxer/x86_64-unknown-redox
+  redoxer exec 2>&1 | grep "/dev/kvm"
   if [ -n "'"$kernel"'" ]; then
     redoxer exec -- true >/tmp/prep.log 2>&1 &
     p=$!
@@ -29,15 +36,15 @@ kmount=""; [ -n "$kernel" ] && kmount="-v $(dirname $kernel):/kdir"
     tar -cpf $B.new -C /tmp/b . && mv $B.new $B
   fi
   redoxer exec -f /mnt -- sh /root/mnt/'"$script"'
-' > $log 2>&1 ) &
+' >> $log 2>&1 ) &
 dpid=$!
 last=0; idle=0
 while kill -0 $dpid 2>/dev/null; do
-  sleep 5
+  sleep 3
   size=$(stat -c %s $log)
-  if [ "$size" = "$last" ]; then idle=$((idle+5)); else idle=0; last=$size; fi
+  if [ "$size" = "$last" ]; then idle=$((idle+3)); else idle=0; last=$size; fi
   grep -aq "LADDER DONE" $log && break
-  if [ $idle -ge 90 ]; then
+  if [ $idle -ge ${VM_IDLE:-45} ]; then
     echo "VM FROZE: no output for ${idle}s; last line: $(tail -c 200 $log | tr -d '\r' | tail -1)" | tee -a $log
     docker kill ladder 2>/dev/null
     break
