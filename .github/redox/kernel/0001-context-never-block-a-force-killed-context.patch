@@ -1,6 +1,6 @@
-From e3d90db8313275ff62a6f23dabfd901cf6776e5d Mon Sep 17 00:00:00 2001
+From 26e3dcd6340fe7de1c678bd97b3c01a326bf425a Mon Sep 17 00:00:00 2001
 From: unxed <egormetlitskiy1998@gmail.com>
-Date: Fri, 18 Sep 2026 21:22:24 +0000
+Date: Fri, 18 Sep 2026 22:50:10 +0000
 Subject: [PATCH] context: never block a force-killed context; keep the per-CPU
  sigkill flag fresh
 
@@ -17,29 +17,31 @@ stays Blocked forever. Its process never finishes exiting: procmgr keeps
 waiting for that thread, the parent's waitpid never returns, and an exiting
 program "prints its result and never exits". A pthread program that
 ping-pongs on semaphores (futex waits with no timeout) and calls exit(0) from
-main hangs in about 30% of runs on x86_64 under QEMU with 2 CPUs.
+main hangs in about 30% of runs on x86_64 under QEMU/TCG with 2 CPUs, and in a
+few percent with KVM and 4 CPUs.
 
 Fix, in two parts:
 
-* Context::block() refuses to block a context that has being_sigkilled set.
-  Both ForceKill and block() run under the context's write lock, so exactly one
-  of them happens first: either ForceKill sees a blocked context and wakes it,
-  or block() sees the kill flag and leaves the context runnable.
+* Context::block() refuses to block a context that has being_sigkilled set
+  (and updates the per-CPU copy of the flag, see below). Both ForceKill and
+  block() run under the context's write lock, so exactly one of them happens
+  first: either ForceKill sees a blocked context and wakes it, or block() sees
+  the kill flag and leaves the context runnable.
 * The syscall exit path decides from a per-CPU copy of being_sigkilled that is
   only refreshed in switch_to(). switch_inner() returns early, without
   switch_to(), when the scheduler picks the context that is already current, so
   a context that was killed while on its way to sleep would return to
   userspace with a stale "not killed" copy. Refresh the copy on that path too.
 ---
- src/context/context.rs | 7 +++++++
- src/context/switch.rs  | 8 ++++++++
- 2 files changed, 15 insertions(+)
+ src/context/context.rs | 14 ++++++++++++++
+ src/context/switch.rs  |  8 ++++++++
+ 2 files changed, 22 insertions(+)
 
 diff --git a/src/context/context.rs b/src/context/context.rs
-index 4032c34..70880b2 100644
+index 4032c34..10d4f37 100644
 --- a/src/context/context.rs
 +++ b/src/context/context.rs
-@@ -273,6 +273,13 @@ impl Context {
+@@ -273,6 +273,20 @@ impl Context {
  
      /// Block the context, and return true if it was runnable before being blocked
      pub fn block(&mut self, reason: &'static str) -> bool {
@@ -48,6 +50,13 @@ index 4032c34..70880b2 100644
 +        // sent the wakeup, so blocking now would overwrite that with Blocked and the wakeup
 +        // would be lost for good (nothing else will ever wake this context).
 +        if self.being_sigkilled {
++            // block() is only ever called on the running context, so keep the per-CPU copy that
++            // the syscall exit path consults in sync right away: the caller is about to return
++            // from its syscall without having slept, and must then notice that it was killed.
++            PercpuBlock::current()
++                .switch_internals
++                .being_sigkilled
++                .set(true);
 +            return false;
 +        }
          if self.status.is_runnable() {

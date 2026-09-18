@@ -35,10 +35,11 @@ return to userspace with a stale `false`.
 
 **Fix.** (`0001-context-never-block-a-force-killed-context.patch`)
 
-1. `Context::block()` returns `false` without blocking if `being_sigkilled` is set. ForceKill
-   and `block()` both run under the context write lock, so exactly one happens first: either
-   ForceKill finds a blocked context and wakes it, or `block()` finds the flag and leaves the
-   context runnable (all callers already handle "was not blocked").
+1. `Context::block()` returns `false` without blocking if `being_sigkilled` is set (and stores
+   `true` in the per-CPU copy of the flag, see 2). ForceKill and `block()` both run under the
+   context write lock, so exactly one happens first: either ForceKill finds a blocked context
+   and wakes it, or `block()` finds the flag and leaves the context runnable (all callers
+   already handle "was not blocked").
 2. `switch_inner()` refreshes the per-CPU `being_sigkilled` copy on the "already current" early
    return.
 

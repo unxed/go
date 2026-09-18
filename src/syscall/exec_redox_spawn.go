@@ -77,6 +77,18 @@ func spawnCall(fn *libcFunc, nargs, a1, a2, a3, a4, a5, a6 uintptr) Errno {
 // fork+exec. Unlike fork+exec, the child's argv[0] is always the program path
 // (relibc's spawn overwrites it).
 func spawnInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr *ProcAttr, sys *SysProcAttr) (pid int, err Errno, ok bool) {
+	// Another goroutine may close a descriptor between the scan for
+	// close-on-exec fds and relibc copying the file table; the child's
+	// "close" action then fails with EBADF. Rescan and retry.
+	for try := 0; ; try++ {
+		pid, err, ok = spawnOnce(argv0, argv, envv, chroot, dir, attr, sys)
+		if !ok || err != EBADF || try >= 5 {
+			return
+		}
+	}
+}
+
+func spawnOnce(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr *ProcAttr, sys *SysProcAttr) (pid int, err Errno, ok bool) {
 	if chroot != nil || sys.Credential != nil || sys.Setsid || sys.Foreground || sys.Setctty || sys.Noctty ||
 		len(attr.Files) > 3 || len(argv) == 0 || len(envv) == 0 {
 		// Fds >= 3 would need care: relibc closes, in the child, every fd number that is
