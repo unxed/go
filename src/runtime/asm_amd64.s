@@ -274,6 +274,12 @@ needtls:
 	// skip TLS setup on Haiku
 	JMP ok
 #endif
+#ifdef GOOS_hurd
+	// skip TLS setup on Hurd: TLS is entirely glibc/pthread's, accessed via
+	// the negative-offset %fs trick (same as Solaris/illumos/Haiku), not
+	// through this software m0.tls self-check.
+	JMP ok
+#endif
 #ifdef GOOS_openbsd
 	// skip TLS setup on OpenBSD
 	JMP ok
