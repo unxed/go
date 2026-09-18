@@ -5425,6 +5425,17 @@ func (s *state) nilCheck(ptr *ssa.Value) *ssa.Value {
 	if base.Debug.DisableNil != 0 || s.curfn.NilCheckDisabled() {
 		return ptr
 	}
+	if buildcfg.GOOS == "redox" && !base.Flag.CompilingRuntime {
+		// Redox's kernel never turns a user page fault into a signal that
+		// the process can handle: it kills the faulting thread outright (and
+		// the process lingers, see the notes in the repository). The runtime's
+		// SIGSEGV -> sigpanic path therefore does not exist, so the implicit,
+		// fault-based nil check cannot be used: branch to runtime.panicmem
+		// instead, exactly like a division-by-zero check.
+		nonNil := s.newValue2(ssa.OpNeqPtr, types.Types[types.TBOOL], ptr, s.constNil(ptr.Type))
+		s.check(nonNil, typecheck.LookupRuntimeFunc("panicmem"))
+		return ptr
+	}
 	return s.newValue2(ssa.OpNilCheck, ptr.Type, ptr, s.mem())
 }
 

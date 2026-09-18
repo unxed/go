@@ -1138,6 +1138,17 @@ func signalDuringFork(sig uint32) {
 //go:norace
 //go:nowritebarrierrec
 func badsignal(sig uintptr, c *sigctxt) {
+	if GOOS == "redox" {
+		// relibc starts a new thread with an empty signal mask and applies
+		// the creator's mask from userspace a little later, so a process-
+		// directed asynchronous signal (SIGCHLD of an exited os/exec child,
+		// ...) can be delivered to a thread that has no g yet. Dropping a
+		// benign asynchronous signal beats crashing the program.
+		switch sig {
+		case _SIGCHLD, _SIGURG, _SIGWINCH, _SIGPROF:
+			return
+		}
+	}
 	if !iscgo && !cgoHasExtraM {
 		// There is no extra M. needm will not be able to grab
 		// an M. Instead of hanging, just crash.

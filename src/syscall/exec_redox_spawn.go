@@ -151,5 +151,6 @@ func spawnInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr *Proc
 	if e != 0 {
 		return 0, e, true
 	}
+	forkExecSpawned = true // read by forkExec while it still holds ForkLock
 	return int(cpid), 0, true
 }

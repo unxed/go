@@ -1,5 +1,4 @@
-// Synchronous faults become Go panics: nil dereference (SIGSEGV from a page
-// fault at a low address) must be recoverable, repeatedly, on any thread.
+// Synchronous faults become Go panics: nil dereference (Redox never delivers page faults as signals, so the compiler emits explicit nil checks) must be recoverable, repeatedly, on any thread.
 // (time.TestIssue5745 hangs otherwise; a spin with "goroutine running on other
 // thread" points at the fault being retried forever.)
 package main
@@ -8,7 +7,6 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
-	"unsafe"
 )
 
 func try(f func()) (r any) {
@@ -38,11 +36,6 @@ func main() {
 	fmt.Println("stage: nil deref with a large offset")
 	if r := try(func() { var p *big; _ = p.x }); r == nil {
 		fmt.Println("FAIL: no panic for large-offset nil deref")
-		return
-	}
-	fmt.Println("stage: bad address (non-nil)")
-	if r := try(func() { p := (*int)(unsafe.Pointer(uintptr(0xdead0000))); _ = *p }); r == nil {
-		fmt.Println("FAIL: no panic for unmapped address")
 		return
 	}
 	fmt.Println("stage: concurrent nil derefs on several threads")

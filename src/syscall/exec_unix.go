@@ -212,7 +212,17 @@ func forkExec(argv0 string, argv []string, attr *ProcAttr) (pid int, err error) 
 		releaseForkLock()
 		return 0, Errno(err1)
 	}
+	spawned := forkExecSpawned
+	forkExecSpawned = false
 	releaseForkLock()
+	if spawned {
+		// Started with posix_spawn (redox): errors were returned synchronously
+		// and the child may still hold a copy of the status pipe, so there is
+		// nothing to read from it.
+		Close(p[0])
+		Close(p[1])
+		return pid, nil
+	}
 
 	// Read child error status from pipe.
 	Close(p[1])
@@ -247,6 +257,10 @@ func forkExec(argv0 string, argv []string, attr *ProcAttr) (pid int, err error) 
 	// Read got EOF, so pipe closed on exec, so exec succeeded.
 	return pid, nil
 }
+
+// forkExecSpawned is set (under ForkLock) by forkAndExecInChild when it
+// started the child with posix_spawn instead of fork+exec; only redox does.
+var forkExecSpawned bool
 
 // Combination of fork and exec, careful to be thread safe.
 func ForkExec(argv0 string, argv []string, attr *ProcAttr) (pid int, err error) {
