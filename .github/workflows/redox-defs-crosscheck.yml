@@ -1,0 +1,61 @@
+name: redox-defs-crosscheck
+
+# Mechanically verify the hand-derived runtime definitions
+# (src/runtime/defs_redox_amd64.go and the constants in os_redox.go,
+# os2_redox.go, netpoll_redox.go) against relibc's real generated C headers,
+# by running `go tool cgo -godefs` with redoxer's cross compiler. Unlike
+# GOOS=hurd, this is possible for Redox because a real target C compiler
+# exists (redoxos/redoxer image). See .github/redox/defs_crosscheck.py.
+
+on:
+  push:
+    branches: [golang-1.26-redox]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  crosscheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+
+      - name: Pull redoxer image
+        run: docker pull redoxos/redoxer
+
+      - name: Install cc wrapper that runs redoxer's cross compiler in Docker
+        run: |
+          sudo tee /usr/local/bin/redox-cc >/dev/null <<'EOF'
+          #!/bin/sh
+          # cgo runs $CC many times, some with the source on stdin (-i) and
+          # with temp files under /tmp; give the container both.
+          exec docker run --rm -i -v /tmp:/tmp -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$PWD" \
+            redoxos/redoxer redoxer cc "$@"
+          EOF
+          sudo chmod +x /usr/local/bin/redox-cc
+          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          redox-cc --version | head -3
+          echo 'int main(void){return 0;}' > /tmp/probe.c
+          redox-cc -o /tmp/probe.out /tmp/probe.c && file /tmp/probe.out
+
+      - name: Cross-check hand-derived definitions against relibc headers
+        run: |
+          export CC=/usr/local/bin/redox-cc
+          python3 .github/redox/defs_crosscheck.py 2>&1 | tee /tmp/crosscheck.log
+
+      - name: Upload cgo output and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redox-defs-crosscheck
+          path: |
+            /tmp/crosscheck.log
+            /tmp/crosscheck/cg.go
+            /tmp/crosscheck/defs_redox.go
+          if-no-files-found: warn

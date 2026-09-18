@@ -32,6 +32,10 @@ package runtime
 #include <pthread.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <poll.h>
+#include <time.h>
+#include <fcntl.h>
+#include <unistd.h>
 */
 import "C"
 
@@ -119,6 +123,23 @@ const (
 
 	_SC_NPROCESSORS_ONLN = C._SC_NPROCESSORS_ONLN
 	_SC_PAGESIZE         = C._SC_PAGESIZE
+
+	// Constants that live outside defs_redox_amd64.go (os_redox.go,
+	// os2_redox.go, netpoll_redox.go); listed here so the CI cross-check
+	// (.github/redox/defs_crosscheck.py) can verify them against the headers
+	// too -- several of those were initially copied from Hurd/Haiku and wrong.
+	O_RDONLY        = C.O_RDONLY
+	SS_DISABLE      = C.SS_DISABLE
+	SIG_UNBLOCK     = C.SIG_UNBLOCK
+	SIG_SETMASK     = C.SIG_SETMASK
+	NSIG            = C.NSIG
+	CLOCK_REALTIME  = C.CLOCK_REALTIME
+	CLOCK_MONOTONIC = C.CLOCK_MONOTONIC
+	POLLIN          = C.POLLIN
+	POLLOUT         = C.POLLOUT
+	POLLHUP         = C.POLLHUP
+	POLLERR         = C.POLLERR
+	RLIMIT_AS       = C.RLIMIT_AS
 )
 
 type SemT C.sem_t

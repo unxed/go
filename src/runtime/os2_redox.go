@@ -22,7 +22,6 @@ import (
 //go:cgo_import_dynamic libc__errnop __errno_location "libc.so.6"
 //go:cgo_import_dynamic libc_clock_gettime clock_gettime "libc.so.6"
 //go:cgo_import_dynamic libc_exit exit "libc.so.6"
-//go:cgo_import_dynamic libc_getcontext getcontext "libc.so.6"
 //go:cgo_import_dynamic libc_kill kill "libc.so.6"
 //go:cgo_import_dynamic libc_getrlimit getrlimit "libc.so.6"
 //go:cgo_import_dynamic libc_malloc malloc "libc.so.6"
@@ -64,7 +63,6 @@ import (
 //go:linkname libc__errnop libc__errnop
 //go:linkname libc_clock_gettime libc_clock_gettime
 //go:linkname libc_exit libc_exit
-//go:linkname libc_getcontext libc_getcontext
 //go:linkname libc_kill libc_kill
 //go:linkname libc_getrlimit libc_getrlimit
 //go:linkname libc_malloc libc_malloc
@@ -107,7 +105,6 @@ var (
 	libc__errnop,
 	libc_clock_gettime,
 	libc_exit,
-	libc_getcontext,
 	libc_getrlimit,
 	libc_kill,
 	libc_malloc,
@@ -147,9 +144,10 @@ var (
 	libc_getegid libcFunc
 )
 
+// relibc's src/header/time/redox.rs -- NOT the Linux/glibc values (0 and 1).
 const (
-	_CLOCK_REALTIME  = 0
-	_CLOCK_MONOTONIC = 1
+	_CLOCK_REALTIME  = 1
+	_CLOCK_MONOTONIC = 4
 )
 
 var sigset_all = ^sigset(0)
@@ -236,11 +234,14 @@ func exitThread(wait *atomic.Uint32) {
 	throw("exitThread")
 }
 
-var urandom_dev = []byte("/dev/random\x00")
+// relibc's own getrandom() reads from the rand scheme (see
+// src/platform/redox/mod.rs); go straight to it rather than relying on
+// /dev/random path translation. O_RDONLY is 0x10000 on Redox, not 0.
+var urandom_dev = []byte("/scheme/rand\x00")
 
 //go:nosplit
 func readRandom(r []byte) int {
-	fd := open(&urandom_dev[0], 0 /* O_RDONLY */, 0)
+	fd := open(&urandom_dev[0], _O_RDONLY, 0)
 	n := read(fd, unsafe.Pointer(&r[0]), int32(len(r)))
 	closefd(fd)
 	return int(n)
@@ -430,11 +431,6 @@ func closefd(fd int32) int32 {
 //go:nosplit
 func exit(r int32) {
 	sysvicall1(&libc_exit, uintptr(r))
-}
-
-//go:nosplit
-func getcontext(context *ucontext) /* int32 */ {
-	sysvicall1(&libc_getcontext, uintptr(unsafe.Pointer(context)))
 }
 
 //go:nosplit

@@ -17,6 +17,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: false
+
+      # QEMU iteration is the bottleneck; fetch the (large) redoxer image in
+      # the background while the toolchain builds instead of serially later.
+      - name: Prefetch redoxer image in the background
+        run: |
+          nohup docker pull redoxos/redoxer > /tmp/docker-pull.log 2>&1 &
 
       - name: Build host (linux/amd64) toolchain
         working-directory: src
@@ -49,6 +56,7 @@ jobs:
           cd /tmp/redoxhello
           GOOS=redox GOARCH=amd64 CGO_ENABLED=1 go build -x -o redoxhello.bin . 2>&1 | tee /tmp/build.log
           echo "BUILD_RC=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+          chmod +x /tmp/redoxhello/redoxhello.bin
 
       - name: Show result
         if: always()
@@ -67,61 +75,45 @@ jobs:
             /tmp/redoxhello/redoxhello.bin
           if-no-files-found: warn
 
-      # Best-effort only: unlike the hurd port, Redox has a real cross C
-      # compiler and a QEMU-based "run it for real" story via redoxer, so
-      # try it -- but GitHub-hosted runners have no /dev/kvm, so a full
-      # QEMU boot under TCG can be slow; this step is timeboxed and
-      # non-blocking (continue-on-error) so a redoxer/QEMU plumbing issue
-      # doesn't hide the primary cross-build signal above.
-      - name: Try running the cross-built binary under redoxer (best effort)
+      # Run the cross-built binary for real under redoxer (QEMU-booted Redox
+      # VM; no /dev/kvm on GitHub-hosted runners so this is TCG-slow, ~1 min).
+      # `-f /mnt` copies the host folder into the VM as /root/mnt/ (the
+      # basename of the given path, not flattened into /root).
+      - name: Run the cross-built binary under redoxer
         if: env.BUILD_RC == '0'
         continue-on-error: true
         timeout-minutes: 10
         run: |
-          docker pull redoxos/redoxer
-          chmod +x /tmp/redoxhello/redoxhello.bin
-          # Bare smoke test first, no folder involved at all -- redoxer's
-          # own Dockerfile uses exactly this ("RUN redoxer exec true") to
-          # verify basic exec works.
-          docker run --rm redoxos/redoxer redoxer exec true 2>&1 | tee /tmp/redoxer-smoketest.log || true
-          # -f/--folder copies the given host folder into the VM as
-          # /root/<basename-of-the-given-path> (confirmed by an `ls -la
-          # /root` diagnostic in a previous round: `-f /mnt` landed as
-          # /root/mnt/, not flattened directly into /root/ as the earlier
-          # attempts assumed -- that mismatch, not a permissions or QEMU
-          # capability issue, is why every prior attempt got "No such file
-          # or directory" for /root/redoxhello.bin).
+          # joins/completes the background prefetch (the daemon dedups layers)
+          docker pull redoxos/redoxer >/dev/null
           docker run --rm -v /tmp/redoxhello:/mnt redoxos/redoxer \
             redoxer exec -f /mnt -- /root/mnt/redoxhello.bin 2>&1 | tee /tmp/redoxer-exec.log
 
-      # Control: with -f the previous step got as far as "redoxerd: Failed
-      # to spawn ... /root/redoxhello.bin" -- the VM found and tried to exec
-      # our binary but couldn't. Before treating that as a runtime-port bug,
-      # rule out generic redoxer/CI plumbing (lost +x bit across the folder
-      # copy, wrong TTY/env setup, etc.) by running an ordinary C program
-      # built with redoxer's own compiler the exact same way.
-      - name: "Control: build and run a trivial C program the same way (best effort)"
-        if: env.BUILD_RC == '0'
-        continue-on-error: true
-        timeout-minutes: 10
-        run: |
-          mkdir -p /tmp/chello
-          cat > /tmp/chello/hello.c <<'EOF'
-          #include <stdio.h>
-          int main(void) { printf("hello from C on redox\n"); return 0; }
-          EOF
-          docker run --rm -v /tmp/chello:/mnt -w /mnt redoxos/redoxer \
-            sh -c 'redoxer cc -o hello.bin hello.c && chmod +x hello.bin'
-          docker run --rm -v /tmp/chello:/mnt redoxos/redoxer \
-            redoxer exec -f /mnt -- /root/mnt/hello.bin 2>&1 | tee /tmp/redoxer-control.log
-
-      - name: Upload redoxer exec logs (if any)
+      - name: Upload redoxer exec log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: redoxer-exec-output
-          path: |
-            /tmp/redoxer-smoketest.log
-            /tmp/redoxer-exec.log
-            /tmp/redoxer-control.log
+          path: /tmp/redoxer-exec.log
           if-no-files-found: ignore
+
+      - name: Symbolize the crash RIP (if any) with the built toolchain
+        if: always()
+        run: |
+          export GOROOT=$(pwd)
+          export PATH=$GOROOT/bin:$PATH
+          rip=$(grep -a "RIP:" /tmp/redoxer-exec.log 2>/dev/null | head -1 | tr -d '\r' | awk '{print $NF}')
+          if [ -z "$rip" ]; then echo "no crash RIP in log"; exit 0; fi
+          echo "crash RIP = 0x$rip"
+          echo "0x$rip" | go tool addr2line /tmp/redoxhello/redoxhello.bin | tee /tmp/crash-symbol.txt
+          echo "### Crash at 0x$rip: $(head -1 /tmp/crash-symbol.txt) $(sed -n 2p /tmp/crash-symbol.txt)" >> "$GITHUB_STEP_SUMMARY"
+          grep -a -B2 -A12 "Breakpoint trap\|Page fault\|Invalid opcode\|General protection" /tmp/redoxer-exec.log | tr -d '\r' | head -60
+
+      # The job status is the milestone signal: green only once "hello" was
+      # actually printed by a Go binary running on Redox.
+      - name: Verify the Go program printed its greeting on Redox
+        run: |
+          grep -a "hello from redox" /tmp/redoxer-exec.log | grep -av 'println' \
+            && echo "### SUCCESS: hello from redox printed by a Go binary running on Redox" >> "$GITHUB_STEP_SUMMARY" \
+            || { echo "### FAILED: no greeting in redoxer output" >> "$GITHUB_STEP_SUMMARY"; \
+                 grep -a "DEBUG\|RIP:\|UNHANDLED\|panic\|fatal error\|Breakpoint\|Page fault\|SIGSEGV" /tmp/redoxer-exec.log | head -40; exit 1; }

@@ -107,6 +107,7 @@ const (
 	_HOST_NAME_MAX  = 0x100 // not probed; conservative POSIX-typical fallback
 	_MAXHOSTNAMELEN = 0x100
 
+	_O_RDONLY   = 0x00010000
 	_O_NONBLOCK = 0x00040000
 	_FD_CLOEXEC = 0x01000000
 	_F_GETFL    = 0x3

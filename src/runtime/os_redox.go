@@ -28,12 +28,15 @@ type mOS struct {
 }
 
 const (
-	_SS_DISABLE  = 4
-	_NSIG        = 33 // SIGRTMIN(35)-ish territory is out of scope; see signal/constants.rs
+	// All verified against relibc source (src/header/signal/{mod,constants}.rs);
+	// several differ from Hurd/glibc's values, which an earlier revision of
+	// this file had copied over by mistake.
+	_SS_DISABLE  = 2  // constants.rs: SS_DISABLE
+	_NSIG        = 32 // constants.rs: NSIG; must equal len(sigtable). Realtime signals (35..64) are not modelled.
 	_SI_USER     = 0
-	_SIG_SETMASK = 3
-	_RLIMIT_AS   = 9 // relibc's sys/resource.h RLIMIT_AS, same numbering as Linux
-	_SIG_UNBLOCK = 2
+	_SIG_SETMASK = 2 // mod.rs: SIG_BLOCK=0, SIG_UNBLOCK=1, SIG_SETMASK=2
+	_RLIMIT_AS   = 9 // sys_resource/mod.rs: RLIMIT_AS
+	_SIG_UNBLOCK = 1
 )
 
 type libcFunc uintptr

@@ -274,6 +274,13 @@ needtls:
 	// skip TLS setup on Haiku
 	JMP ok
 #endif
+#ifdef GOOS_redox
+	// skip TLS setup on Redox: relibc's ld.so allocates the executable's
+	// PT_TLS block at FS-relative negative offsets (variant II), the same
+	// arrangement Solaris/illumos rely on, so g lives at -8(FS) without us
+	// touching FS ourselves.
+	JMP ok
+#endif
 #ifdef GOOS_openbsd
 	// skip TLS setup on OpenBSD
 	JMP ok
