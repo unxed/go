@@ -1,5 +1,6 @@
 # Runs the cross-compiled std test binaries (go test -c) inside the Redox VM.
 # Layout: /root/mnt/<pkg>.test and /root/mnt/data/<pkg>/ (testdata, cwd of the run).
+export GOROOT=/root/mnt   # tests locate lib/time/zoneinfo.zip through it
 # run_test <name> [limit] [label]: label distinguishes variants of the same binary (log key)
 run_test() {
   n=$1; limit=${2:-60}; label=${3:-$1}
