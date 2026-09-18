@@ -66,6 +66,9 @@ func removeAll(path string) error {
 func removeAllFrom(parentFd sysfdType, base string) error {
 	// Simple case: if Unlink (aka remove) works, we're done.
 	err := removefileat(parentFd, base)
+	if runtime.GOOS == "redox" {
+		println("DBG removeAllFrom: parentFd", parentFd, "base", base, "removefileat err:", err)
+	}
 	if err == nil || IsNotExist(err) {
 		return nil
 	}
@@ -89,6 +92,9 @@ func removeAllFrom(parentFd sysfdType, base string) error {
 
 		// Open the directory to recurse into.
 		file, err := openDirAt(parentFd, base)
+		if runtime.GOOS == "redox" {
+			println("DBG openDirAt:", base, "err:", err, "file:", file != nil)
+		}
 		if err != nil {
 			if IsNotExist(err) {
 				return nil
@@ -109,6 +115,9 @@ func removeAllFrom(parentFd sysfdType, base string) error {
 			numErr := 0
 
 			names, readErr := file.Readdirnames(reqSize)
+			if runtime.GOOS == "redox" {
+				println("DBG Readdirnames:", base, "n:", len(names), "err:", readErr)
+			}
 			// Errors other than EOF should stop us from continuing.
 			if readErr != nil && readErr != io.EOF {
 				file.Close()
