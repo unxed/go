@@ -55,7 +55,7 @@ jobs:
           cp $GITHUB_WORKSPACE/.github/redox/ladder/x17_exit_c/main.c /tmp/x17.c
           docker run --rm -v /tmp:/tmp -w /tmp redoxos/redoxer redoxer cc -O1 -pthread \
             -o /tmp/pkg/out/x17_exit_c.bin /tmp/x17.c
-          chmod +x /tmp/pkg/out/x17_exit_c.bin
+          sudo chmod +x /tmp/pkg/out/x17_exit_c.bin
           cp $GITHUB_WORKSPACE/.github/redox/run_common.sh /tmp/pkg/out/common.sh
           cp $GITHUB_WORKSPACE/.github/redox/kernel/run_kernel_ab.sh /tmp/pkg/out/
 
