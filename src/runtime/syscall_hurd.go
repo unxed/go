@@ -51,9 +51,6 @@ func syscall_rawsysvicall6(fn, nargs, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2, e
 	return call.r1, call.r2, call.err
 }
 
-
-
-
 // TODO(aram): Once we remove all instances of C calling sysvicallN, make
 // sysvicallN return errors and replace the body of the following functions
 // with calls to sysvicallN.
@@ -198,6 +195,7 @@ func syscall_ioctl(fd, req, arg uintptr) (err uintptr) {
 
 // This is syscall.RawSyscall, it exists to satisfy some build dependency,
 // but it doesn't work.
+//
 //go:linkname syscall_rawsyscall
 func syscall_rawsyscall(trap, a1, a2, a3 uintptr) (r1, r2, err uintptr) {
 	panic("RawSyscall not available on Hurd")
@@ -205,6 +203,7 @@ func syscall_rawsyscall(trap, a1, a2, a3 uintptr) (r1, r2, err uintptr) {
 
 // This is syscall.RawSyscall6, it exists to avoid a linker error because
 // syscall.RawSyscall6 is already declared. See golang.org/issue/24357
+//
 //go:linkname syscall_rawsyscall6
 func syscall_rawsyscall6(trap, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2, err uintptr) {
 	panic("RawSyscall6 not available on Hurd")

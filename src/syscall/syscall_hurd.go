@@ -25,7 +25,6 @@ const (
 	_F_DUP2FD_CLOEXEC = 0
 )
 
-
 /*type SockaddrDatalink struct {
 	Family uint16
 	Index  uint16
@@ -36,7 +35,6 @@ const (
 	Data   [244]int8
 	raw    RawSockaddrDatalink
 }*/
-
 
 func direntIno(buf []byte) (uint64, bool) {
 	return readInt(buf, unsafe.Offsetof(Dirent{}.Ino), unsafe.Sizeof(Dirent{}.Ino))
@@ -607,4 +605,3 @@ func Getdirentries(fd int, buf []byte, basep *uintptr) (n int, err error) {
 
 	return n, nil
 }
-
