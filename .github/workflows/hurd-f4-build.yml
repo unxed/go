@@ -81,9 +81,14 @@ jobs:
           head -150 /tmp/out/build-all.log
           grep -oE 'undefined: unix\.[A-Za-z0-9_]+' /tmp/out/build-all.log | sort | uniq -c | sort -rn > /tmp/out/undefined-unix.txt || true
           wc -l < /tmp/out/undefined-unix.txt
-          go build -o /tmp/out/f4.bin ./cmd/f4 > /tmp/out/build-f4.log 2>&1
-          echo "F4_RC=$?" | tee -a "$GITHUB_ENV"
+          F4_RC=0
+          go build -o /tmp/out/f4.bin ./cmd/f4 > /tmp/out/build-f4.log 2>&1 || F4_RC=$?
+          echo "F4_RC=$F4_RC"
           head -60 /tmp/out/build-f4.log
+          if [ "$F4_RC" = "0" ]; then
+            go build -ldflags='-s -w' -o /tmp/out/f4-stripped.bin ./cmd/f4
+            gzip -9 -k -f /tmp/out/f4-stripped.bin
+          fi
           ls -l /tmp/out
 
       - name: Upload
