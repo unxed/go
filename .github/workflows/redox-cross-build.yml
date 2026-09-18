@@ -146,15 +146,16 @@ jobs:
                 echo "$n BUILD_OK" >> /tmp/pkg/ladder-build.txt
               else
                 echo "$n BUILD_FAIL" >> /tmp/pkg/ladder-build.txt
-                echo "::group::build of $n failed"; head -60 /tmp/ladder-build-$n.log; echo "::endgroup::"
+                echo "::group::build of $n failed"; tail -60 /tmp/ladder-build-$n.log; echo "::endgroup::"
               fi
               continue
             fi
-            if GOOS=redox GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/pkg/out/$n.bin ./$n > /tmp/ladder-build-$n.log 2>&1; then
+            cgo=0; xflag=""; [ -f $n/NEEDS_CGO ] && { cgo=1; xflag=-x; }
+            if GOOS=redox GOARCH=amd64 CGO_ENABLED=$cgo CC=/usr/local/bin/redox-cc go build $xflag -o /tmp/pkg/out/$n.bin ./$n > /tmp/ladder-build-$n.log 2>&1; then
               echo "$n BUILD_OK" >> /tmp/pkg/ladder-build.txt
             else
               echo "$n BUILD_FAIL" >> /tmp/pkg/ladder-build.txt
-              echo "::group::build of $n failed"; head -60 /tmp/ladder-build-$n.log; echo "::endgroup::"
+              echo "::group::build of $n failed"; tail -60 /tmp/ladder-build-$n.log; echo "::endgroup::"
             fi
           done
           cp /tmp/ladder-build-*.log /tmp/pkg/
