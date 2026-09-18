@@ -112,10 +112,28 @@ jobs:
           cat /tmp/ladder-build.txt
           echo "LADDER_BUILT=$(grep -c BUILD_OK /tmp/ladder-build.txt)" >> "$GITHUB_ENV"
           cat > out/run_ladder.sh <<'EOF'
+          run_one() {
+            bin="$1"; variant="$2"; n="$3"
+            echo "=== BEGIN $bin variant=$variant run=$n"
+            case "$variant" in
+              default) $bin & ;;
+              nopreempt) GODEBUG=asyncpreemptoff=1 $bin & ;;
+              procs1) GOMAXPROCS=1 $bin & ;;
+            esac
+            pid=$!
+            ( sleep 60; kill -9 $pid 2>/dev/null && echo "=== WATCHDOG killed $bin" ) &
+            wd=$!
+            wait $pid
+            rc=$?
+            kill $wd 2>/dev/null
+            echo "=== END $bin variant=$variant run=$n exit=$rc"
+          }
           for p in /root/mnt/p*.bin; do
-            echo "=== BEGIN $p"
-            $p
-            echo "=== END $p exit=$?"
+            for v in default nopreempt procs1; do
+              for n in 1 2 3; do
+                run_one $p $v $n
+              done
+            done
           done
           EOF
           ls -la out
@@ -137,10 +155,10 @@ jobs:
       - name: Run the ladder under redoxer
         if: env.LADDER_BUILT != '0'
         continue-on-error: true
-        timeout-minutes: 12
+        timeout-minutes: 28
         run: |
           docker pull redoxos/redoxer >/dev/null
-          timeout 600 docker run --rm -v /tmp/ladder/out:/mnt redoxos/redoxer \
+          timeout 1500 docker run --rm -v /tmp/ladder/out:/mnt redoxos/redoxer \
             redoxer exec -f /mnt -- sh /root/mnt/run_ladder.sh 2>&1 | tee /tmp/redoxer-exec.log
 
       - name: Upload redoxer exec log
