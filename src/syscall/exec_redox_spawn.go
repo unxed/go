@@ -62,7 +62,10 @@ type (
 	spawnAttr        [8]uintptr
 )
 
-const spawnSetPgroup = 2 // relibc's POSIX_SPAWN_SETPGROUP
+const (
+	spawnSetPgroup = 2    // relibc's POSIX_SPAWN_SETPGROUP
+	spawnScanLimit = 1024 // highest descriptor (exclusive) examined for close-on-exec
+)
 
 func spawnCall(fn *libcFunc, nargs, a1, a2, a3, a4, a5, a6 uintptr) Errno {
 	r, _, _ := sysvicall6(uintptr(unsafe.Pointer(fn)), nargs, a1, a2, a3, a4, a5, a6)
@@ -130,6 +133,18 @@ func spawnInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr *Proc
 	for _, t := range temps {
 		if e := spawnCall(&libc_posix_spawn_file_actions_addclose, 2, uintptr(unsafe.Pointer(&fa)), uintptr(t), 0, 0, 0, 0); e != 0 {
 			return 0, e, true
+		}
+	}
+
+	// relibc's posix_spawn is meant to close, in the child, every descriptor
+	// that is close-on-exec in the parent, but in practice does not (a `cat`
+	// child keeps the write end of its own stdin pipe open and never sees EOF;
+	// the exec status pipe stays open too). Do it explicitly.
+	for fd := 3; fd < spawnScanLimit; fd++ {
+		if v, e := fcntl(fd, F_GETFD, 0); e == nil && v&FD_CLOEXEC != 0 {
+			if e := spawnCall(&libc_posix_spawn_file_actions_addclose, 2, uintptr(unsafe.Pointer(&fa)), uintptr(fd), 0, 0, 0, 0); e != 0 {
+				return 0, e, true
+			}
 		}
 	}
 
