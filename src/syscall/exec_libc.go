@@ -97,6 +97,10 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 		ngroups, groups uintptr
 	)
 
+	if pid, err, ok := spawnInChild(argv0, argv, envv, chroot, dir, attr, sys); ok {
+		return pid, err
+	}
+
 	rlim := origRlimitNofile.Load()
 
 	// guard against side effects of shuffling fds below.
