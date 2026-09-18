@@ -102,17 +102,32 @@ const (
 // sigcontext still mirrors the registers we were handed, so an unexpected
 // layout degrades to "changes ignored" instead of corrupting the frame.
 //
+// hurdSigDebug (temporary) logs the first few signals with the register changes
+// and the write-back decision.
+const hurdSigDebug = true
+
+var hurdSigCount uint32
+
 //go:nosplit
 //go:nowritebarrierrec
 func sighandlerhurd(sig uint32, info *siginfo, ctx unsafe.Pointer, gp *g, scp unsafe.Pointer) {
 	mc := &(*ucontext)(ctx).uc_mcontext
 	orig := mc.gregs
 	sighandler(sig, info, ctx, gp)
-	if scp == nil || mc.gregs == orig {
-		return
+	changed := mc.gregs != orig
+	matched := false
+	if scp != nil && changed {
+		sc := (*[_NGREGS_MIRROR]uint64)(add(scp, _SC_R8_OFFSET))
+		if *sc == *(*[_NGREGS_MIRROR]uint64)(unsafe.Pointer(&orig)) {
+			matched = true
+			*sc = *(*[_NGREGS_MIRROR]uint64)(unsafe.Pointer(&mc.gregs))
+		}
 	}
-	sc := (*[_NGREGS_MIRROR]uint64)(add(scp, _SC_R8_OFFSET))
-	if *sc == *(*[_NGREGS_MIRROR]uint64)(unsafe.Pointer(&orig)) {
-		*sc = *(*[_NGREGS_MIRROR]uint64)(unsafe.Pointer(&mc.gregs))
+	if hurdSigDebug && sig != _SIGURG && hurdSigCount < 12 {
+		hurdSigCount++
+		println("sighandlerhurd sig=", sig, " changed=", changed, " matched=", matched,
+			" rip ", hex(orig[_REG_RIP]), "->", hex(mc.gregs[_REG_RIP]),
+			" rsp ", hex(orig[_REG_RSP]), "->", hex(mc.gregs[_REG_RSP]),
+			" scp=", scp, " sigcode=", info.si_code, " addr=", hex(info.si_addr))
 	}
 }
