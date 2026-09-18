@@ -20,10 +20,45 @@ jobs:
           cache: false
 
       # QEMU iteration is the bottleneck; fetch the (large) redoxer image in
-      # the background while the toolchain builds instead of serially later.
+      # the background while other steps run.
       - name: Prefetch redoxer image in the background
         run: |
           nohup docker pull redoxos/redoxer > /tmp/docker-pull.log 2>&1 &
+
+      - name: Install cc wrapper that runs redoxer's cross compiler in Docker
+        run: |
+          sudo tee /usr/local/bin/redox-cc >/dev/null <<'EOF'
+          #!/bin/sh
+          exec docker run --rm -i -v /tmp:/tmp -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$PWD" \
+            redoxos/redoxer redoxer cc "$@"
+          EOF
+          sudo chmod +x /usr/local/bin/redox-cc
+
+      # syscall's generated files come from relibc's real headers, not from
+      # hand-written tables: cgo -godefs (types, errno/signal/etc constants)
+      # via redoxer's compiler, and mksyscall_redox.pl for the libc stubs.
+      - name: Generate syscall/ztypes, zerrors (cgo -godefs) and zsyscall (mksyscall)
+        run: |
+          set -o pipefail
+          export CC=/usr/local/bin/redox-cc
+          python3 .github/redox/gen_syscall.py 2>&1 | tee /tmp/gen-syscall.log
+          cd src/syscall
+          perl mksyscall_redox.pl -tags redox,amd64 syscall_redox.go syscall_redox_amd64.go > zsyscall_redox_amd64.go
+          wc -l z*_redox_amd64.go
+          cd ../..
+          git status --short src/syscall | tee /tmp/gen-drift.txt
+
+      - name: Upload generated syscall files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redox-generated-syscall
+          path: |
+            src/syscall/ztypes_redox_amd64.go
+            src/syscall/zerrors_redox_amd64.go
+            src/syscall/zsyscall_redox_amd64.go
+            /tmp/gen-syscall.log
+          if-no-files-found: warn
 
       - name: Build host (linux/amd64) toolchain
         working-directory: src
@@ -32,62 +67,79 @@ jobs:
           echo "GOROOT_BOOTSTRAP=$GOROOT_BOOTSTRAP"
           ./make.bash
 
-      - name: Write trivial hello-world test program (no stdlib imports)
-        run: |
-          mkdir -p /tmp/redoxhello
-          cat > /tmp/redoxhello/main.go <<'EOF'
-          package main
-
-          func main() {
-              println("hello from redox")
-          }
-          EOF
-          cat > /tmp/redoxhello/go.mod <<'EOF'
-          module redoxhello
-
-          go 1.26
-          EOF
-
-      - name: Cross-compile for GOOS=redox GOARCH=amd64 (CGO_ENABLED=1)
+      # Bulk compile check of the std packages we care about, reporting ALL
+      # errors (-e) across independent packages in one round.
+      - name: Compile-check std packages for GOOS=redox
+        continue-on-error: true
         run: |
           export GOROOT=$(pwd)
           export PATH=$GOROOT/bin:$PATH
           go version
-          cd /tmp/redoxhello
-          GOOS=redox GOARCH=amd64 CGO_ENABLED=1 go build -x -o redoxhello.bin . 2>&1 | tee /tmp/build.log
-          echo "BUILD_RC=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
-          chmod +x /tmp/redoxhello/redoxhello.bin
+          GOOS=redox GOARCH=amd64 CGO_ENABLED=0 go build -gcflags=-e \
+            syscall internal/syscall/unix internal/poll os fmt time os/signal os/exec io/fs net crypto/rand \
+            2>&1 | tee /tmp/compile-check.log
+          echo "compile-check finished; $(grep -c . /tmp/compile-check.log) lines of output"
 
-      - name: Show result
+      - name: Upload compile-check log
         if: always()
-        run: |
-          echo "build rc: $BUILD_RC"
-          file /tmp/redoxhello/redoxhello.bin 2>/dev/null || echo "(no binary produced)"
-          echo "### Cross-build result: rc=$BUILD_RC" >> "$GITHUB_STEP_SUMMARY"
+        uses: actions/upload-artifact@v4
+        with:
+          name: redox-compile-check
+          path: /tmp/compile-check.log
+          if-no-files-found: ignore
 
-      - name: Upload build log and binary (if any)
+      # The validation ladder: independent programs of increasing difficulty,
+      # each built separately so failures are attributable.
+      - name: Build the validation-ladder programs
+        run: |
+          export GOROOT=$(pwd)
+          export PATH=$GOROOT/bin:$PATH
+          rm -rf /tmp/ladder && mkdir -p /tmp/ladder/out
+          cp -r .github/redox/ladder/* /tmp/ladder/
+          printf 'module ladder\n\ngo 1.26\n' > /tmp/ladder/go.mod
+          : > /tmp/ladder-build.txt
+          cd /tmp/ladder
+          for d in p*/; do
+            n=${d%/}
+            if GOOS=redox GOARCH=amd64 CGO_ENABLED=0 go build -o out/$n.bin ./$n > /tmp/ladder-build-$n.log 2>&1; then
+              echo "$n BUILD_OK" >> /tmp/ladder-build.txt
+              chmod +x out/$n.bin
+            else
+              echo "$n BUILD_FAIL" >> /tmp/ladder-build.txt
+              echo "::group::build of $n failed"; head -60 /tmp/ladder-build-$n.log; echo "::endgroup::"
+            fi
+          done
+          cat /tmp/ladder-build.txt
+          cat > out/run_ladder.sh <<'EOF'
+          for p in /root/mnt/p*.bin; do
+            echo "=== BEGIN $p"
+            $p
+            echo "=== END $p exit=$?"
+          done
+          EOF
+          ls -la out
+
+      - name: Upload build logs and binaries
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: redox-cross-build-output
           path: |
-            /tmp/build.log
-            /tmp/redoxhello/redoxhello.bin
+            /tmp/ladder/out
+            /tmp/ladder-build-*.log
+            /tmp/ladder-build.txt
           if-no-files-found: warn
 
-      # Run the cross-built binary for real under redoxer (QEMU-booted Redox
-      # VM; no /dev/kvm on GitHub-hosted runners so this is TCG-slow, ~1 min).
-      # `-f /mnt` copies the host folder into the VM as /root/mnt/ (the
-      # basename of the given path, not flattened into /root).
-      - name: Run the cross-built binary under redoxer
-        if: env.BUILD_RC == '0'
+      # Run all ladder programs in ONE QEMU boot (no /dev/kvm on GitHub-hosted
+      # runners, so a boot is TCG-slow, ~1 min). `-f /mnt` copies the host
+      # folder into the VM as /root/mnt/.
+      - name: Run the ladder under redoxer
         continue-on-error: true
-        timeout-minutes: 10
+        timeout-minutes: 12
         run: |
-          # joins/completes the background prefetch (the daemon dedups layers)
           docker pull redoxos/redoxer >/dev/null
-          docker run --rm -v /tmp/redoxhello:/mnt redoxos/redoxer \
-            redoxer exec -f /mnt -- /root/mnt/redoxhello.bin 2>&1 | tee /tmp/redoxer-exec.log
+          timeout 600 docker run --rm -v /tmp/ladder/out:/mnt redoxos/redoxer \
+            redoxer exec -f /mnt -- sh /root/mnt/run_ladder.sh 2>&1 | tee /tmp/redoxer-exec.log
 
       - name: Upload redoxer exec log
         if: always()
@@ -105,15 +157,13 @@ jobs:
           rip=$(grep -a "RIP:" /tmp/redoxer-exec.log 2>/dev/null | head -1 | tr -d '\r' | awk '{print $NF}')
           if [ -z "$rip" ]; then echo "no crash RIP in log"; exit 0; fi
           echo "crash RIP = 0x$rip"
-          echo "0x$rip" | go tool addr2line /tmp/redoxhello/redoxhello.bin | tee /tmp/crash-symbol.txt
-          echo "### Crash at 0x$rip: $(head -1 /tmp/crash-symbol.txt) $(sed -n 2p /tmp/crash-symbol.txt)" >> "$GITHUB_STEP_SUMMARY"
-          grep -a -B2 -A12 "Breakpoint trap\|Page fault\|Invalid opcode\|General protection" /tmp/redoxer-exec.log | tr -d '\r' | head -60
+          for b in /tmp/ladder/out/*.bin; do
+            echo "--- $b"; echo "0x$rip" | go tool addr2line $b | head -2
+          done
+          grep -a -B4 -A14 "Breakpoint trap\|Page fault\|Invalid opcode\|General protection\|panic\|fatal error\|SIGSEGV\|goroutine " /tmp/redoxer-exec.log | tr -d '\r' | head -80
 
-      # The job status is the milestone signal: green only once "hello" was
-      # actually printed by a Go binary running on Redox.
-      - name: Verify the Go program printed its greeting on Redox
-        run: |
-          grep -a "hello from redox" /tmp/redoxer-exec.log | grep -av 'println' \
-            && echo "### SUCCESS: hello from redox printed by a Go binary running on Redox" >> "$GITHUB_STEP_SUMMARY" \
-            || { echo "### FAILED: no greeting in redoxer output" >> "$GITHUB_STEP_SUMMARY"; \
-                 grep -a "DEBUG\|RIP:\|UNHANDLED\|panic\|fatal error\|Breakpoint\|Page fault\|SIGSEGV" /tmp/redoxer-exec.log | head -40; exit 1; }
+      # The job status is the milestone signal: green only when every rung of
+      # the ladder built and printed its "OK <name>" line on Redox.
+      - name: Ladder summary (fails unless every rung passed)
+        if: always()
+        run: python3 .github/redox/ladder_summary.py

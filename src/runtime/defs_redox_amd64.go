@@ -35,6 +35,7 @@ const (
 	_ENOMEM    = 0xc
 	_ETIMEDOUT = 0x6e
 	_EACCES    = 0xd
+	_ENOSYS    = 0x26
 
 	_PROT_NONE  = 0x0
 	_PROT_READ  = 0x4

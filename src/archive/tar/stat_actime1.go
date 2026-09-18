@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build aix || haiku || linux || dragonfly || openbsd || solaris
+//go:build aix || haiku || redox || linux || dragonfly || openbsd || solaris
 
 package tar
 

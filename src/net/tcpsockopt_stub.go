@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build haiku || js || wasip1
+//go:build haiku || redox || js || wasip1
 
 package net
 

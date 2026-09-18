@@ -179,6 +179,15 @@ haiku_amd64)
 	mksysnum=
 	mktypes="GOARCH=$GOARCH go tool cgo -godefs"
 	;;
+redox_amd64)
+	# Generated in CI against relibc's headers with redoxer's cross compiler:
+	# see .github/redox/gen_syscall.py (ztypes, zerrors) and
+	# .github/workflows/redox-cross-build.yml (zsyscall via mksyscall_redox.pl).
+	mksyscall="./mksyscall_redox.pl"
+	mkerrors=
+	mksysnum=
+	mktypes="GOARCH=$GOARCH go tool cgo -godefs"
+	;;
 linux_386)
 	mkerrors="$mkerrors -m32"
 	mksyscall="./mksyscall.pl -l32"
