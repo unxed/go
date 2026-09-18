@@ -1,0 +1,66 @@
+name: hurd-cross-build
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build host (linux/amd64) toolchain
+        working-directory: src
+        run: |
+          export GOROOT_BOOTSTRAP=$(dirname $(dirname $(which go)))
+          echo "GOROOT_BOOTSTRAP=$GOROOT_BOOTSTRAP"
+          ./make.bash
+
+      - name: Write trivial hello-world test program (no stdlib imports)
+        run: |
+          mkdir -p /tmp/hurdhello
+          cat > /tmp/hurdhello/main.go <<'EOF'
+          package main
+
+          func main() {
+              println("hello from hurd")
+          }
+          EOF
+          cat > /tmp/hurdhello/go.mod <<'EOF'
+          module hurdhello
+
+          go 1.26
+          EOF
+
+      - name: Cross-compile for GOOS=hurd GOARCH=amd64 (CGO_ENABLED=1)
+        run: |
+          export GOROOT=$(pwd)
+          export PATH=$GOROOT/bin:$PATH
+          go version
+          cd /tmp/hurdhello
+          GOOS=hurd GOARCH=amd64 CGO_ENABLED=1 go build -x -o hurdhello.bin . 2>&1 | tee /tmp/build.log
+          echo "BUILD_RC=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Show result
+        if: always()
+        run: |
+          echo "build rc: $BUILD_RC"
+          file /tmp/hurdhello/hurdhello.bin 2>/dev/null || echo "(no binary produced)"
+          echo "### Cross-build result: rc=$BUILD_RC" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log and binary (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hurd-cross-build-output
+          path: |
+            /tmp/build.log
+            /tmp/hurdhello/hurdhello.bin
+          if-no-files-found: warn
