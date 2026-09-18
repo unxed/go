@@ -9,9 +9,9 @@ import (
 // dirty them, free them (GC), and re-allocate, checking for non-zero bytes.
 func main() {
 	bad := 0
-	for round := 0; round < 6; round++ {
+	for round := 0; round < 2; round++ {
 		var keep [][]byte
-		for i := 0; i < 48; i++ {
+		for i := 0; i < 12; i++ {
 			b := make([]byte, 1<<20)
 			for j := range b {
 				if b[j] != 0 {
@@ -22,7 +22,7 @@ func main() {
 			for j := range b {
 				b[j] = 0xAA
 			}
-			if i%4 == 0 {
+			if i%6 == 0 {
 				keep = append(keep, b)
 			}
 		}

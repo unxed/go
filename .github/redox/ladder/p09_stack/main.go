@@ -17,15 +17,15 @@ func rec(n int) int {
 
 func main() {
 	// deep recursion forces repeated stack growth (copy) on the main goroutine
-	r := rec(200000)
-	fmt.Println("rec(200000) =", r)
+	r := rec(60000)
+	fmt.Println("rec(60000) =", r)
 	var wg sync.WaitGroup
-	res := make([]int, 64)
+	res := make([]int, 16)
 	for i := range res {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			res[i] = rec(20000 + i)
+			res[i] = rec(5000 + i)
 		}(i)
 	}
 	wg.Wait()

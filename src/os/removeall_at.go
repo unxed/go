@@ -67,7 +67,7 @@ func removeAllFrom(parentFd sysfdType, base string) error {
 	// Simple case: if Unlink (aka remove) works, we're done.
 	err := removefileat(parentFd, base)
 	if runtime.GOOS == "redox" {
-		println("DBG removeAllFrom: parentFd", parentFd, "base", base, "removefileat err:", err)
+		println("DBG removeAllFrom: parentFd", parentFd, "base", base, "removefileat err:", dbgErr(err))
 	}
 	if err == nil || IsNotExist(err) {
 		return nil
@@ -93,7 +93,12 @@ func removeAllFrom(parentFd sysfdType, base string) error {
 		// Open the directory to recurse into.
 		file, err := openDirAt(parentFd, base)
 		if runtime.GOOS == "redox" {
-			println("DBG openDirAt:", base, "err:", err, "file:", file != nil)
+			println("DBG openDirAt:", base, "err:", dbgErr(err), "file:", file != nil)
+			if file != nil {
+				var st syscall.Stat_t
+				e := syscall.Fstat(int(file.Fd()), &st)
+				println("DBG   fstat of opened dir fd", int(file.Fd()), ":", dbgErr(e), "mode", st.Mode, "ino", st.Ino)
+			}
 		}
 		if err != nil {
 			if IsNotExist(err) {
@@ -116,7 +121,7 @@ func removeAllFrom(parentFd sysfdType, base string) error {
 
 			names, readErr := file.Readdirnames(reqSize)
 			if runtime.GOOS == "redox" {
-				println("DBG Readdirnames:", base, "n:", len(names), "err:", readErr)
+				println("DBG Readdirnames:", base, "n:", len(names), "err:", dbgErr(readErr))
 			}
 			// Errors other than EOF should stop us from continuing.
 			if readErr != nil && readErr != io.EOF {
@@ -187,4 +192,12 @@ func openDirAt(dirfd sysfdType, name string) (*File, error) {
 		return nil, err
 	}
 	return newDirFile(fd, name)
+}
+
+// TEMPORARY (redox debugging)
+func dbgErr(err error) string {
+	if err == nil {
+		return "<nil>"
+	}
+	return err.Error()
 }
