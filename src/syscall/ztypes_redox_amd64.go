@@ -62,9 +62,9 @@ type Stat_t struct {
 	Dev	uint64
 	Ino	uint64
 	Nlink	uint64
-	Mode	int32
-	Uid	int32
-	Gid	int32
+	Mode	uint32
+	Uid	uint32
+	Gid	uint32
 	Rdev	uint64
 	Size	int64
 	Blksize	int64

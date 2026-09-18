@@ -85,6 +85,13 @@ def main():
     if dropped:
         print("ztypes: dropped unresolved C names:", dropped)
     out = out.replace("// cgo -godefs types_redox.go", "// cgo -godefs types_redox.go (run against relibc headers via redoxer cc)")
+    # relibc's mode_t/uid_t/gid_t are C ints, but every Go unix port (and the
+    # third-party code written against them) has unsigned Mode/Uid/Gid in Stat_t.
+    # Same size and layout, so make them uint32.
+    m = re.search(r"type Stat_t struct \{.*?\n\}", out, re.S)
+    assert m, "Stat_t not found in cgo output"
+    fixed = re.sub(r"^(\s*(?:Mode|Uid|Gid)\s+)int32$", r"\1uint32", m.group(0), flags=re.M)
+    out = out.replace(m.group(0), fixed)
     open(f"{SYS}/ztypes_redox_amd64.go", "w").write(out)
     print(f"wrote {SYS}/ztypes_redox_amd64.go ({len(out.splitlines())} lines)")
 

@@ -115,6 +115,17 @@ jobs:
           path: /tmp/compile-check.log
           if-no-files-found: ignore
 
+      # Regression check for the packages that touch syscall.Stat_t & friends
+      # (the full "std" compile check is in the optional step above).
+      - name: Compile-check packages that use syscall types
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          export GOROOT=$(pwd)
+          export PATH=$GOROOT/bin:$PATH
+          GOOS=redox GOARCH=amd64 CGO_ENABLED=0 go build archive/tar archive/zip os/user os/exec os/signal io/fs net net/http 2>&1 | tee /tmp/compile-quick.log
+          echo "compile-quick: $(grep -c . /tmp/compile-quick.log) lines of errors"
+
       # The validation ladder: independent programs of increasing difficulty,
       # each built separately so failures are attributable. x17 is plain C,
       # compiled by redoxer's cross compiler (also proves the C toolchain works).
