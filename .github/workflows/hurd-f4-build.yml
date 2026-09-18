@@ -58,6 +58,12 @@ jobs:
           GOFLAGS=-mod=mod go mod vendor 2> /tmp/out/vendor.err || { cat /tmp/out/vendor.err | tail -20; }
           python3 "$GOROOT/.github/scripts/hurd_retag.py" vendor . | tee /tmp/out/retag.txt | head -60
           git diff -- . ':!vendor' > /tmp/out/f4-own-changes.patch || true
+          # which unix.* identifiers do f4 and its dependencies use (x/sys itself excluded)?
+          grep -rhoE '\bunix\.[A-Za-z0-9_]+' --include='*.go' --exclude='*_test.go' . 2>/dev/null \
+            | sort | uniq -c | sort -rn > /tmp/out/unix-used.txt || true
+          wc -l < /tmp/out/unix-used.txt
+          grep -rlE '"golang.org/x/sys/unix"' --include='*.go' --exclude='*_test.go' . | grep -v '^./vendor/golang.org/x/sys/' > /tmp/out/unix-importers.txt || true
+          wc -l < /tmp/out/unix-importers.txt
           export GOOS=hurd GOARCH=amd64 CGO_ENABLED=0 GOFLAGS=-mod=vendor
           go build -gcflags=-e ./... > /tmp/out/build-all.log 2>&1 || true
           echo "packages with errors: $(grep -c '^#' /tmp/out/build-all.log)"

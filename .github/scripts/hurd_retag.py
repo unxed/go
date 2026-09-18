@@ -13,8 +13,8 @@ import os, re, sys
 changed, byname = [], []
 for root_dir in sys.argv[1:]:
     for dp, dn, fn in os.walk(root_dir):
-        if '/.git' in dp:
-            continue
+        if '/.git' in dp or 'golang.org/x/sys' in dp or 'golang.org/x/net' in dp:
+            continue   # x/sys/unix is replaced by a hurd shim; x/net builds on it
         for f in fn:
             if not f.endswith('.go'):
                 continue
