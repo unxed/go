@@ -80,6 +80,12 @@ jobs:
         run: |
           docker pull redoxos/redoxer
           chmod +x /tmp/redoxhello/redoxhello.bin
+          # Bare smoke test first, no folder involved at all -- redoxer's
+          # own Dockerfile uses exactly this ("RUN redoxer exec true") to
+          # verify basic exec works. If this also fails, the problem is
+          # generic QEMU/redoxerd capability in this sandbox (e.g. no KVM),
+          # not anything about our binary or the folder-copy mechanism.
+          docker run --rm redoxos/redoxer redoxer exec true 2>&1 | tee /tmp/redoxer-smoketest.log || true
           # A plain bind mount isn't enough -- redoxer exec runs the binary
           # inside a QEMU-booted Redox VM, so the file has to be copied INTO
           # that VM image via -f/--folder, not just visible to the host
@@ -115,6 +121,7 @@ jobs:
         with:
           name: redoxer-exec-output
           path: |
+            /tmp/redoxer-smoketest.log
             /tmp/redoxer-exec.log
             /tmp/redoxer-control.log
           if-no-files-found: ignore
