@@ -69,8 +69,13 @@ const (
 
 func spawnCall(fn *libcFunc, nargs, a1, a2, a3, a4, a5, a6 uintptr) Errno {
 	r, _, _ := sysvicall6(uintptr(unsafe.Pointer(fn)), nargs, a1, a2, a3, a4, a5, a6)
+	if r != 0 && spawnDebug {
+		println("spawn(TEMP debug): libc fn", uintptr(unsafe.Pointer(fn)), "args", a2, a3, "-> errno", r)
+	}
 	return Errno(r)
 }
+
+const spawnDebug = true // TEMPORARY
 
 // spawnInChild starts the child with posix_spawn when the request can be
 // expressed that way; ok == false means the caller must fall back to
