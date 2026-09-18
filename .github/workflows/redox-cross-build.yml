@@ -79,8 +79,13 @@ jobs:
         timeout-minutes: 10
         run: |
           docker pull redoxos/redoxer
+          # A plain bind mount isn't enough -- redoxer exec runs the binary
+          # inside a QEMU-booted Redox VM, so the file has to be copied INTO
+          # that VM image via -f/--folder, not just visible to the host
+          # container. (First attempt without -f failed: "redoxerd: Failed
+          # to spawn ... /root" -- redoxer couldn't find the binary at all.)
           docker run --rm -v /tmp/redoxhello:/mnt redoxos/redoxer \
-            redoxer exec -- /mnt/redoxhello.bin 2>&1 | tee /tmp/redoxer-exec.log
+            redoxer exec -f /mnt -- /mnt/redoxhello.bin 2>&1 | tee /tmp/redoxer-exec.log
 
       - name: Upload redoxer exec log (if any)
         if: always()
