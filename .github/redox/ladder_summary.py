@@ -34,14 +34,14 @@ except FileNotFoundError:
 
 runs = defaultdict(list)  # (name, variant) -> [(ok, code, out)]
 for m in re.finditer(
-    r"=== BEGIN \S*?/(\w+)\.bin variant=(\w+) run=(\d+)\n(.*?)=== END \S+ variant=\w+ run=\d+ exit=(-?\d+)",
+    r"=== BEGIN \S*?/(\w+)\.bin variant=(\w+) run=(\d+)\n(.*?)=== END \S+ variant=\w+ run=\d+ exit=(\S+)",
     log,
     re.S,
 ):
-    name, variant, out, code = m.group(1), m.group(2), m.group(4), int(m.group(5))
+    name, variant, out, code = m.group(1), m.group(2), m.group(4), m.group(5)
     ok = (
         re.search(r"^OK %s$" % re.escape(name), out, re.M) is not None
-        and "WATCHDOG killed" not in out
+        and not re.search(r"^HANG ", out, re.M)
     )
     runs[(name, variant)].append((ok, code, out))
 

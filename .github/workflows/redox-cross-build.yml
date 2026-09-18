@@ -118,30 +118,46 @@ jobs:
           cat /tmp/ladder-build.txt
           echo "LADDER_BUILT=$(grep -c BUILD_OK /tmp/ladder-build.txt)" >> "$GITHUB_ENV"
           cat > out/run_ladder.sh <<'EOF'
+          # Never `wait` on a possibly wedged process (kill -9 does not always
+          # free it on Redox): run it in a background subshell that records
+          # its exit code, poll for that for up to 20s, and move on either way.
           run_one() {
             bin="$1"; variant="$2"; n="$3"
             echo "=== BEGIN $bin variant=$variant run=$n"
-            case "$variant" in
-              default) $bin & ;;
-              nopreempt) GODEBUG=asyncpreemptoff=1 $bin & ;;
-              procs1) GOMAXPROCS=1 $bin & ;;
-            esac
-            pid=$!
-            ( sleep 25; kill -9 $pid 2>/dev/null && echo "=== WATCHDOG killed $bin" && echo "HANG $bin" ) &
-            wd=$!
-            wait $pid
-            rc=$?
-            kill $wd 2>/dev/null
+            rm -f /tmp/rc.done
+            (
+              case "$variant" in
+                default) $bin ;;
+                nopreempt) GODEBUG=asyncpreemptoff=1 $bin ;;
+                procs1) GOMAXPROCS=1 $bin ;;
+              esac
+              echo $? > /tmp/rc.done
+            ) &
+            sp=$!
+            t=0
+            while [ ! -f /tmp/rc.done ] && [ $t -lt 20 ]; do sleep 1; t=$((t+1)); done
+            if [ -f /tmp/rc.done ]; then
+              rc=`cat /tmp/rc.done`
+            else
+              echo "HANG $bin"
+              kill -9 $sp 2>/dev/null
+              rc=hang
+            fi
             echo "=== END $bin variant=$variant run=$n exit=$rc"
           }
-          # phase A (gating): every rung once, plain
-          for p in /root/mnt/p*.bin; do run_one $p default 1; done
-          # phase B (flake probe): the tiny fmt program repeatedly under
-          # three variants, plus the signal-return probe without preemption
-          for v in default nopreempt procs1; do
-            for n in 2 3 4 5 6 7; do run_one /root/mnt/p02_fmt.bin $v $n; done
+          run_one /root/mnt/p01_println.bin default 1
+          # signal-return probe first: plain signals (no asyncPreempt injection) then with
+          run_one /root/mnt/p10_sigstorm.bin nopreempt 1
+          run_one /root/mnt/p10_sigstorm.bin default 1
+          # flake probe: the tiny fmt program under three variants
+          for n in 1 2 3 4; do
+            for v in default nopreempt procs1; do run_one /root/mnt/p02_fmt.bin $v $n; done
           done
-          for n in 2 3; do run_one /root/mnt/p10_sigstorm.bin nopreempt $n; done
+          # gating: the remaining rungs once, plain
+          for p in /root/mnt/p03*.bin /root/mnt/p04*.bin /root/mnt/p05*.bin /root/mnt/p06*.bin /root/mnt/p07*.bin /root/mnt/p08*.bin /root/mnt/p09*.bin; do
+            run_one $p default 1
+          done
+          echo "=== LADDER DONE"
           EOF
           ls -la out
 
