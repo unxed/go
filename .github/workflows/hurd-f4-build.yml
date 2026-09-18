@@ -57,6 +57,14 @@ jobs:
           # vendor all dependencies, then treat hurd like solaris in their build constraints
           GOFLAGS=-mod=mod go mod vendor 2> /tmp/out/vendor.err || { cat /tmp/out/vendor.err | tail -20; }
           python3 "$GOROOT/.github/scripts/hurd_retag.py" vendor . | tee /tmp/out/retag.txt | head -60
+          # afero: BADFD is EBADFD (linux only) elsewhere; hurd behaves like the BSDs here
+          sed -i 's/aix || darwin || openbsd/aix || darwin || hurd || openbsd/' vendor/github.com/spf13/afero/const_bsds.go
+          sed -i 's/!darwin \&\& !openbsd/!darwin \&\& !hurd \&\& !openbsd/' vendor/github.com/spf13/afero/const_win_unix.go
+          # golang.org/x/sys/unix has no gc/hurd port: replace the package by a hurd shim
+          if [ -d "$GOROOT/misc/hurd/xsys-unix" ]; then
+            rm -f vendor/golang.org/x/sys/unix/*
+            cp "$GOROOT"/misc/hurd/xsys-unix/*.go vendor/golang.org/x/sys/unix/
+          fi
           git diff -- . ':!vendor' > /tmp/out/f4-own-changes.patch || true
           # which unix.* identifiers do f4 and its dependencies use (x/sys itself excluded)?
           grep -rhoE '\bunix\.[A-Za-z0-9_]+' --include='*.go' --exclude='*_test.go' . 2>/dev/null \
@@ -68,6 +76,8 @@ jobs:
           go build -gcflags=-e ./... > /tmp/out/build-all.log 2>&1 || true
           echo "packages with errors: $(grep -c '^#' /tmp/out/build-all.log)"
           head -150 /tmp/out/build-all.log
+          grep -oE 'undefined: unix\.[A-Za-z0-9_]+' /tmp/out/build-all.log | sort | uniq -c | sort -rn > /tmp/out/undefined-unix.txt || true
+          wc -l < /tmp/out/undefined-unix.txt
           go build -o /tmp/out/f4.bin ./cmd/f4 > /tmp/out/build-f4.log 2>&1
           echo "F4_RC=$?" | tee -a "$GITHUB_ENV"
           head -60 /tmp/out/build-f4.log
