@@ -17,6 +17,7 @@ run_one /root/mnt/p11_time_rand.bin default 1
 run_one /root/mnt/p12_stdin.bin stdin 1
 run_one /root/mnt/p13_signal.bin default 1
 run_one /root/mnt/x15_net.bin default 1
+run_one /root/mnt/x24_nilpanic.bin default 1
 run_one /root/mnt/x10_sigstorm.bin default 1
 run_one /root/mnt/x10_sigstorm.bin preempt 1
 # memory/GC-heavy rungs last: they have occasionally frozen the whole VM
