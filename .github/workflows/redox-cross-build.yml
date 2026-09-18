@@ -79,6 +79,7 @@ jobs:
         timeout-minutes: 10
         run: |
           docker pull redoxos/redoxer
+          chmod +x /tmp/redoxhello/redoxhello.bin
           # A plain bind mount isn't enough -- redoxer exec runs the binary
           # inside a QEMU-booted Redox VM, so the file has to be copied INTO
           # that VM image via -f/--folder, not just visible to the host
@@ -87,10 +88,33 @@ jobs:
           docker run --rm -v /tmp/redoxhello:/mnt redoxos/redoxer \
             redoxer exec -f /mnt -- /mnt/redoxhello.bin 2>&1 | tee /tmp/redoxer-exec.log
 
-      - name: Upload redoxer exec log (if any)
+      # Control: with -f the previous step got as far as "redoxerd: Failed
+      # to spawn ... /root/redoxhello.bin" -- the VM found and tried to exec
+      # our binary but couldn't. Before treating that as a runtime-port bug,
+      # rule out generic redoxer/CI plumbing (lost +x bit across the folder
+      # copy, wrong TTY/env setup, etc.) by running an ordinary C program
+      # built with redoxer's own compiler the exact same way.
+      - name: Control: build and run a trivial C program the same way (best effort)
+        if: env.BUILD_RC == '0'
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir -p /tmp/chello
+          cat > /tmp/chello/hello.c <<'EOF'
+          #include <stdio.h>
+          int main(void) { printf("hello from C on redox\n"); return 0; }
+          EOF
+          docker run --rm -v /tmp/chello:/mnt -w /mnt redoxos/redoxer \
+            sh -c 'redoxer cc -o hello.bin hello.c && chmod +x hello.bin'
+          docker run --rm -v /tmp/chello:/mnt redoxos/redoxer \
+            redoxer exec -f /mnt -- /mnt/hello.bin 2>&1 | tee /tmp/redoxer-control.log
+
+      - name: Upload redoxer exec logs (if any)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: redoxer-exec-output
-          path: /tmp/redoxer-exec.log
+          path: |
+            /tmp/redoxer-exec.log
+            /tmp/redoxer-control.log
           if-no-files-found: ignore
