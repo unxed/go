@@ -225,7 +225,7 @@ jobs:
   # The exit hang is a kernel bug (see .github/redox/kernel/): a thread that
   # procmgr ForceKills while it is about to block is never woken. So every VM job
   # runs twice: on the stock kernel of redoxer's image, and on the same kernel
-  # source with .github/redox/kernel/0001-context-never-block-a-force-killed-context.patch applied.
+  # source with .github/redox/kernel/0001-futex-don-t-sleep-on-an-untimed-wait-when-the-contex.patch applied.
   kernel:
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -241,7 +241,7 @@ jobs:
           mkdir /tmp/kernel-src && cd /tmp/kernel-src
           git init -q . && git remote add origin https://gitlab.redox-os.org/redox-os/kernel.git
           git fetch -q --depth 1 origin $KERNEL_SHA && git checkout -q FETCH_HEAD
-          git apply $GITHUB_WORKSPACE/.github/redox/kernel/0001-context-never-block-a-force-killed-context.patch
+          git apply $GITHUB_WORKSPACE/.github/redox/kernel/0001-futex-don-t-sleep-on-an-untimed-wait-when-the-contex.patch
           make ARCH=x86_64 OBJCOPY=objcopy BUILD=/tmp/kbuild all 2>&1 | tail -5
           ls -la /tmp/kbuild/kernel
       - uses: actions/upload-artifact@v4

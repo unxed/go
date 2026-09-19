@@ -33,18 +33,19 @@ A second, related hole: the syscall exit path tests the *per-CPU copy*
 ("no switch needs to be done"), so a context that was killed while on its way to sleep can
 return to userspace with a stale `false`.
 
-**Fix.** (`0001-context-never-block-a-force-killed-context.patch`)
+**Fix.** (`0001-futex-don-t-sleep-on-an-untimed-wait-when-the-contex.patch`, v3)
 
-1. `Context::block()` returns `false` without blocking if `being_sigkilled` is set (and stores
-   `true` in the per-CPU copy of the flag, see 2). ForceKill and `block()` both run under the
-   context write lock, so exactly one happens first: either ForceKill finds a blocked context
-   and wakes it, or `block()` finds the flag and leaves the context runnable (all callers
-   already handle "was not blocked").
-2. `switch_inner()` refreshes the per-CPU `being_sigkilled` copy on the "already current" early
-   return.
+1. `futex(FUTEX_WAIT)` returns EINTR without blocking when `being_sigkilled` is set. The check sits
+   in the same critical section (the context write lock that ForceKill also takes) as the
+   pending-signal check and `Context::block()`, so exactly one of them happens first. It also
+   stores `true` in the per-CPU copy of the flag, because we are the running context and will not switch.
+2. `switch_inner()` refreshes the per-CPU `being_sigkilled` copy on the "already current" early return.
 
-`hard_block()` is intentionally left alone (its `AwaitingMmap` user has no obvious way to
-observe a spurious wakeup).
+(v2 made `Context::block()` itself refuse to block a sigkilled context. That fixed the hang too, but
+broke the invariant of `UserInner::call_inner`, which blocks and then direct-switches to the scheme
+handler: a dying context whose close calls no longer blocked made `exit_this_context`'s final
+`context::switch` return and hit `unreachable!()` (process.rs:83) in 2 of 2 runs of a concurrent
+`posix_spawn` stress, 0 of 4 on unpatched kernels. v3 changes only the futex path.)
 
 **Not covered / caveats.** Verified only on x86_64 under QEMU with `-smp 2` (TCG, which makes
 the window wide). The futex wait leaves its `FutexEntry` behind when `block()` declines; the

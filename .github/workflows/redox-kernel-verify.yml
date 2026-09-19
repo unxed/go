@@ -4,7 +4,7 @@ name: redox-kernel-verify
 # (ForceKill of a thread that is on its way to sleep is lost). Variants:
 #   stock     the kernel shipped in redoxer's image, untouched
 #   baseline  Redox kernel master, built here, unpatched
-#   patched   the same source + .github/redox/kernel/0001-context-never-block-a-force-killed-context.patch
+#   patched   the same source + .github/redox/kernel/0001-futex-don-t-sleep-on-an-untimed-wait-when-the-contex.patch
 # Each boots under redoxer and runs the pure-C reproducer x17 (no Go involved).
 on:
   push:
@@ -41,8 +41,8 @@ jobs:
           git fetch -q --depth 1 origin $KERNEL_SHA && git checkout -q FETCH_HEAD
           git log --oneline -1
           if [ "${{ matrix.variant }}" = patched ]; then
-            git apply --check $GITHUB_WORKSPACE/.github/redox/kernel/0001-context-never-block-a-force-killed-context.patch
-            git apply $GITHUB_WORKSPACE/.github/redox/kernel/0001-context-never-block-a-force-killed-context.patch
+            git apply --check $GITHUB_WORKSPACE/.github/redox/kernel/0001-futex-don-t-sleep-on-an-untimed-wait-when-the-contex.patch
+            git apply $GITHUB_WORKSPACE/.github/redox/kernel/0001-futex-don-t-sleep-on-an-untimed-wait-when-the-contex.patch
             git diff --stat
           fi
           make ARCH=x86_64 OBJCOPY=objcopy BUILD=/tmp/kbuild all 2>&1 | tail -15
