@@ -1,4 +1,4 @@
-From acc7a887a13b615faee2deded373c1ec2c1db4eb Mon Sep 17 00:00:00 2001
+From 5868a5d92421afd33691fae09d5458db8abe83ef Mon Sep 17 00:00:00 2001
 From: unxed <ivan.sorokin.tech@gmail.com>
 Date: Sat, 19 Sep 2026 09:55:03 +0000
 Subject: [PATCH] DEBUG: lock-free per-CPU event ring + no-progress watchdog
@@ -7,13 +7,13 @@ Subject: [PATCH] DEBUG: lock-free per-CPU event ring + no-progress watchdog
 ---
  src/context/context.rs |   3 +
  src/context/mod.rs     |   7 +++
- src/context/switch.rs  |  18 ++++++
- src/dbgring.rs         | 129 +++++++++++++++++++++++++++++++++++++++++
+ src/context/switch.rs  |  21 +++++++
+ src/dbgring.rs         | 130 +++++++++++++++++++++++++++++++++++++++++
  src/main.rs            |   3 +
  src/panic.rs           |   2 +
  src/scheme/proc.rs     |   6 ++
  src/syscall/process.rs |  12 ++++
- 8 files changed, 180 insertions(+)
+ 8 files changed, 184 insertions(+)
  create mode 100644 src/dbgring.rs
 
 diff --git a/src/context/context.rs b/src/context/context.rs
@@ -63,10 +63,20 @@ index 86ec64b..fe8021e 100644
      let target_cpu = cpu_id.unwrap_or(curr_cpu);
  
 diff --git a/src/context/switch.rs b/src/context/switch.rs
-index e4f6cac..491a9b8 100644
+index e4f6cac..1053892 100644
 --- a/src/context/switch.rs
 +++ b/src/context/switch.rs
-@@ -193,6 +193,7 @@ fn switch_inner(
+@@ -120,6 +120,9 @@ pub fn tick(token: &mut CleanLockToken) {
+     let new_ticks = ticks_cell.get() + 1;
+     ticks_cell.set(new_ticks);
+ 
++    // DEBUG: no-progress watchdog from the timer tick (also fires when CPUs never go idle)
++    crate::dbgring::watchdog(crate::time::monotonic(token));
++
+     // Trigger a context switch after every 3 ticks (approx. 6.75 ms).
+     if new_ticks >= TICK_INTERVAL as usize {
+         switch(token);
+@@ -193,6 +196,7 @@ fn switch_inner(
      token: &mut CleanLockToken,
  ) -> SwitchResult {
      if try_direct_switch_back(percpu, schedule_time, token) {
@@ -74,7 +84,7 @@ index e4f6cac..491a9b8 100644
          return SwitchResult::Switched;
      }
  
-@@ -211,6 +212,12 @@ fn switch_inner(
+@@ -211,6 +215,12 @@ fn switch_inner(
              ),
              // didn't change sched context, so will not change current context
              ScheduleResult::AllContextsIdle => {
@@ -87,7 +97,7 @@ index e4f6cac..491a9b8 100644
                  percpu.stats.set_state(cpu_stats::CpuState::Idle);
  
                  return SwitchResult::AllContextsIdle;
-@@ -225,6 +232,7 @@ fn switch_inner(
+@@ -225,6 +235,7 @@ fn switch_inner(
      ) {
          // We had already switched the current context to the one now picked by the scheduler, so
          // no switch needs to be done.
@@ -95,7 +105,7 @@ index e4f6cac..491a9b8 100644
          return SwitchResult::Switched;
      }
      let current_context_guard = if Arc::ptr_eq(
-@@ -469,8 +477,10 @@ fn schedule(
+@@ -469,8 +480,10 @@ fn schedule(
          was_idle,
          &mut prev_context_guard,
      ) else {
@@ -106,7 +116,7 @@ index e4f6cac..491a9b8 100644
  
      *percpu.switch_internals.sched_ctxt.borrow_mut() = Some(Arc::clone(
          ArcContextLockWriteGuard::rwlock(&next_sched_context),
-@@ -1143,6 +1153,14 @@ unsafe fn switch_to(
+@@ -1143,6 +1156,14 @@ unsafe fn switch_to(
      switch_time: u128,
      was_idle: bool,
  ) {
@@ -123,10 +133,10 @@ index e4f6cac..491a9b8 100644
      // thus check if it has been removed, and if so reinsert it to the fast wakeup queue.
 diff --git a/src/dbgring.rs b/src/dbgring.rs
 new file mode 100644
-index 0000000..db888e8
+index 0000000..dc3354b
 --- /dev/null
 +++ b/src/dbgring.rs
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,130 @@
 +//! DEBUG: lock-free per-CPU event ring for hunting context-switch bugs. No formatting in the hot
 +//! path: an event is a few stores. Dumped from the panic path and by a "no progress" watchdog.
 +use alloc::sync::Arc;
@@ -220,6 +230,7 @@ index 0000000..db888e8
 +/// Called on every CPU tick that found nothing to run; if no context switch to a non-idle
 +/// context happened for ~15 s, dump the ring and the state of all contexts, once.
 +pub fn watchdog(now_ns: u128) {
++    // (called from the timer tick of every CPU and from the idle path)
 +    let now = now_ns as u64;
 +    let p = PROGRESS.load(Ordering::Relaxed);
 +    if p != LAST_PROGRESS.load(Ordering::Relaxed) {
@@ -232,7 +243,7 @@ index 0000000..db888e8
 +        LAST_CHANGE_NS.store(now, Ordering::Relaxed);
 +        return;
 +    }
-+    if now.saturating_sub(last) > 15_000_000_000 && !DUMPED.load(Ordering::Relaxed) {
++    if now.saturating_sub(last) > 12_000_000_000 && !DUMPED.load(Ordering::Relaxed) {
 +        dump("watchdog: no switch to a non-idle context for 15 s", 120);
 +        dump_contexts();
 +    }
