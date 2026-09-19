@@ -19,5 +19,5 @@ run $v x32_poll_regular_c 1 30
 n=1; while [ $n -le 3 ]; do run $v x33_thread_sigmask_c $n 60; n=$((n+1)); done
 fi
 # last: a wedged/panicked VM ends the boot
-n=1; while [ $n -le 15 ]; do run $v x27_spawnpar_c $n 60; n=$((n+1)); done
+n=1; while [ $n -le 25 ]; do run $v x27_spawnpar_c $n 60; n=$((n+1)); done
 echo "=== LADDER DONE"

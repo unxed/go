@@ -1,17 +1,17 @@
-From f181899c6efd897ea68292e1944c43ac6c53f74b Mon Sep 17 00:00:00 2001
+From 7663e25f11398dcdd0705ffbd5af4f2b970ac5d8 Mon Sep 17 00:00:00 2001
 From: unxed <ivan.sorokin.tech@gmail.com>
 Date: Sat, 19 Sep 2026 08:37:06 +0000
 Subject: [PATCH] DEBUG: report why a dead context keeps running after
  context::switch
 
 ---
- src/context/switch.rs  | 44 ++++++++++++++++++++++++++++++++++++++++++
+ src/context/switch.rs  | 52 ++++++++++++++++++++++++++++++++++++++++++
  src/cpu_stats.rs       |  4 ++++
- src/syscall/process.rs |  3 ++-
- 3 files changed, 50 insertions(+), 1 deletion(-)
+ src/syscall/process.rs | 17 +++++++++++++-
+ 3 files changed, 72 insertions(+), 1 deletion(-)
 
 diff --git a/src/context/switch.rs b/src/context/switch.rs
-index e4f6cac..66034aa 100644
+index e4f6cac..752f34e 100644
 --- a/src/context/switch.rs
 +++ b/src/context/switch.rs
 @@ -187,12 +187,47 @@ pub fn switch(token: &mut CleanLockToken) -> SwitchResult {
@@ -62,17 +62,25 @@ index e4f6cac..66034aa 100644
          return SwitchResult::Switched;
      }
  
-@@ -211,6 +246,9 @@ fn switch_inner(
+@@ -211,6 +246,17 @@ fn switch_inner(
              ),
              // didn't change sched context, so will not change current context
              ScheduleResult::AllContextsIdle => {
 +                if let Some(d) = &dbg {
 +                    println!("DBGDEAD: schedule() -> AllContextsIdle with a dead current context: {}", d);
 +                }
++                {
++                    // DEBUG: an idle CPU whose run queue is not empty
++                    static DBG_TICKS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
++                    let q = percpu.switch_internals.queue_len.load(Ordering::Relaxed);
++                    if q > 0 && DBG_TICKS.fetch_add(1, Ordering::Relaxed) % 256 == 0 {
++                        println!("DBGIDLEQ cpu={} idle with run queue length {}", percpu.cpu_id.get(), q);
++                    }
++                }
                  percpu.stats.set_state(cpu_stats::CpuState::Idle);
  
                  return SwitchResult::AllContextsIdle;
-@@ -225,6 +263,9 @@ fn switch_inner(
+@@ -225,6 +271,9 @@ fn switch_inner(
      ) {
          // We had already switched the current context to the one now picked by the scheduler, so
          // no switch needs to be done.
@@ -82,7 +90,7 @@ index e4f6cac..66034aa 100644
          return SwitchResult::Switched;
      }
      let current_context_guard = if Arc::ptr_eq(
-@@ -258,6 +299,9 @@ fn switch_inner(
+@@ -258,6 +307,9 @@ fn switch_inner(
          );
      }
  
@@ -108,14 +116,44 @@ index aa02fd4..98316e6 100644
          self.state.store(new_state as u8, Ordering::Relaxed);
      }
 diff --git a/src/syscall/process.rs b/src/syscall/process.rs
-index a89f80b..91083a1 100644
+index a89f80b..cedbe57 100644
 --- a/src/syscall/process.rs
 +++ b/src/syscall/process.rs
-@@ -79,7 +79,8 @@ pub fn exit_this_context(excp: Option<syscall::Exception>, token: &mut CleanLock
+@@ -35,6 +35,11 @@ use super::usercopy::UserSliceWo;
+ ///
+ pub fn exit_this_context(excp: Option<syscall::Exception>, token: &mut CleanLockToken) -> ! {
+     let context_lock = Arc::clone(&*context::current());
++    let dbg_id = context_lock.read(token.token()).debug_id;
++    let dbg_exc = excp.is_some();
++    if dbg_exc {
++        println!("DBGEXC1 cpu={} ctx={} enters exit_this_context (exception)", crate::cpu_id().get(), dbg_id);
++    }
+     let (addrspace_opt, mut close_files) = {
+         let mut context = context_lock.write(token.token());
+         let (context, token) = context.token_split();
+@@ -46,8 +51,14 @@ pub fn exit_this_context(excp: Option<syscall::Exception>, token: &mut CleanLock
+         (addrspace_opt, close_files)
+     };
+ 
++    if dbg_exc {
++        println!("DBGEXC2 ctx={} closing files", dbg_id);
++    }
+     // Files must be closed while context is valid so that messages can be passed
+     close_files.force_close_all(token);
++    if dbg_exc {
++        println!("DBGEXC3 ctx={} files closed, dropping address space", dbg_id);
++    }
+     if let Some(addrspace) = addrspace_opt {
+         if let Ok(addrspace) = Arc::try_unwrap(addrspace) {
+             addrspace.into_drop(token);
+@@ -79,7 +90,11 @@ pub fn exit_this_context(excp: Option<syscall::Exception>, token: &mut CleanLock
          drop(context_ref);
      }
      drop(close_files);
 -    context::switch(token);
++    if dbg_exc {
++        println!("DBGEXC4 ctx={} status Dead, switching away", dbg_id);
++    }
 +    let dbg_result = context::switch(token);
 +    println!("DBGDEAD exit_this_context: switch returned {:?}", dbg_result as u8);
      unreachable!();
