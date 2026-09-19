@@ -26,14 +26,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [baseline, both]
-        rep: [1, 2]
+        variant: [stock, baseline, both, ring]
+        rep: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
 
       - name: Build the kernel (${{ matrix.variant }})
         if: matrix.variant != 'stock'
-        timeout-minutes: 6
+        timeout-minutes: 8
         run: |
           sudo apt-get install -y -qq nasm >/dev/null
           rustup toolchain install nightly-2026-05-24 --profile minimal -c rust-src 2>&1 | tail -3
@@ -48,6 +48,7 @@ jobs:
             cow)     git am -3 $K/0002-*.patch ;;
             both)    git am -3 $K/0001-*.patch $K/0002-*.patch ;;
             dbg)     git am -3 $K/debug/0001-*.patch ;;
+            ring)    git am -3 $K/debug/0002-*.patch ;;
           esac
           git log --oneline -3; git diff --stat 2d2eef7 | tail -3
           make ARCH=x86_64 OBJCOPY=objcopy BUILD=/tmp/kbuild all 2>&1 | tail -15
@@ -66,6 +67,10 @@ jobs:
           docker run --rm -v /tmp:/tmp -w /tmp redoxos/redoxer redoxer cc -O1 -pthread \
             -o /tmp/pkg/out/x23_futex_fork_c.bin /tmp/x23.c
           sudo chmod +x /tmp/pkg/out/x23_futex_fork_c.bin
+          cp $GITHUB_WORKSPACE/.github/redox/ladder/x37_crash_loop_c/main.c /tmp/x37.c
+          docker run --rm -v /tmp:/tmp -w /tmp redoxos/redoxer redoxer cc -O1 -pthread \
+            -o /tmp/pkg/out/x37_crash_loop_c.bin /tmp/x37.c
+          sudo chmod +x /tmp/pkg/out/x37_crash_loop_c.bin
           cp $GITHUB_WORKSPACE/.github/redox/ladder/x36_heartbeat_c/main.c /tmp/x36.c
           docker run --rm -v /tmp:/tmp -w /tmp redoxos/redoxer redoxer cc -O1 \
             -o /tmp/pkg/out/x36_heartbeat_c.bin /tmp/x36.c
