@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [unpatched, patched]
+        variant: [unpatched, no6, patched]
     steps:
       - uses: actions/checkout@v4
       - name: Pull redoxer image
@@ -52,7 +52,7 @@ jobs:
         run: |
           cd relibc
           git config user.name ci && git config user.email ci@example.com
-          for p in ../.github/redox/relibc/patches/*.patch; do echo "== $p"; git am "$p"; done
+          for p in ../.github/redox/relibc/patches/*.patch; do case "$p" in *0006*) [ "${{ matrix.variant }}" = no6 ] && continue ;; esac; echo "== $p"; git am "$p"; done
           if [ "${{ matrix.variant }}" = debug ]; then git am ../.github/redox/relibc/debug/0002-*.patch; fi
           if [ "${{ matrix.variant }}" = lockclose ]; then git am ../.github/redox/relibc/debug/0001-*.patch; fi
           git log --oneline -6; git diff --stat 69bb008 | tail -3
@@ -89,7 +89,7 @@ jobs:
         run: |
           docker pull redoxos/redoxer >/dev/null
           mkdir -p /tmp/w/bins && cp -r .github/redox/ladder/x26_spawn_cloexec_c .github/redox/ladder/x27_spawnpar_c .github/redox/ladder/x32_poll_regular_c .github/redox/ladder/x33_thread_sigmask_c /tmp/w/
-          for v in unpatched patched; do
+          for v in unpatched no6 patched; do
             for p in x26_spawn_cloexec_c x27_spawnpar_c x32_poll_regular_c x33_thread_sigmask_c; do
               docker run --rm -v /tmp:/tmp -w /tmp/w redoxos/redoxer redoxer cc -O1 -pthread \
                 -Wl,--dynamic-linker=/root/mnt/$v/ld64.so.1 -o bins/${p}_$v.bin $p/main.c
@@ -109,8 +109,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [unpatched, patched]
-        rep: [1, 2, 3, 4, 5, 6]
+        variant: [unpatched, no6, patched]
+        rep: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -122,7 +122,7 @@ jobs:
         run: |
           mkdir -p vm/bins
           cp art/repro-bins/* vm/bins/
-          for v in unpatched patched; do
+          for v in unpatched no6 patched; do
             d=$(find art/relibc-$v -type d -name $v | head -1)
             [ -n "$d" ] && cp -r "$d" vm/$v || echo "no libc for $v"
           done
