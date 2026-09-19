@@ -15,7 +15,8 @@ Runs: `https://github.com/unxed/go/actions/runs/<id>`.
 | 7 | relibc | `sigentry` clobbers RCX of the interrupted code | `x10_sigstorm` | (earlier) | fixed upstream: unxed/relibc `fix-sigentry-rcx-clobber` (8022058e); Go still keeps async preemption off by default until the image has the fix |
 | 8 | relibc | `poll()` fails the *whole call* (EPERM) when one descriptor cannot be watched, e.g. a regular file | found by f4-redox, unxed/sandbox run 35399359761; no C repro yet | | worked around in Go (`netpollopen` probes each fd) |
 | 9 | relibc | `poll()` on a tty slave reportedly returns no events although data is available (f4-redox, still being narrowed down); the C repro with a plain pty pair does **not** show it, in canonical or raw mode | `x29_pty_c` | see the latest cross-build run | worked around in Go (terminals are marked ready every 10 ms) |
-| 10 | QEMU TCG only | CLOCK_MONOTONIC / CLOCK_REALTIME read on different vCPUs go backwards by up to ~4 ms | `x21_clock_c` | 35392788829 | gone with KVM |
+| 10 | kernel (or relibc spawn) | under 4-way concurrent `posix_spawn`, a just-spawned child ran with all registers zero (page fault at RIP 0) and the kernel then panicked in `exit_this_context` (`syscall/process.rs:83`, `context::switch` returned to a dead context) - seen once, on the patched kernel (35407656018); repeated 8x on both kernels in later runs to see whether the patch matters | `x27_spawnpar_c` | 35407656018 | open |
+| 11 | QEMU TCG only | CLOCK_MONOTONIC / CLOCK_REALTIME read on different vCPUs go backwards by up to ~4 ms | `x21_clock_c` | 35392788829 | gone with KVM |
 
 Not a bug, but easy to trip over: a process created by `posix_spawn` starts with all-zero FPU
 control state. relibc's `crt0` sets MXCSR/x87 CW (`src/crt0`), so C programs are fine; an ELF entry

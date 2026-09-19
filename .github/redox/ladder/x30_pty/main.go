@@ -6,7 +6,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"syscall"
 	"time"
 )
 
@@ -35,22 +34,16 @@ func main() {
 		fmt.Println("FAIL open ptmx:", err)
 		return
 	}
-	// Find the slave: candidates from the master's stat, each verified by an echo.
+	// Find the slave: the stat carries no id on Redox, so probe ids from the top;
+	// only the real slave echoes what the master writes.
 	var s *os.File
-	var cands []uint64
-	if fi, err := m.Stat(); err == nil {
-		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-			fmt.Printf("master stat: ino=%d rdev=%d size=%d mode=%o\n", st.Ino, st.Rdev, st.Size, st.Mode)
-			cands = append(cands, st.Ino, st.Rdev, uint64(st.Size))
-		}
-	}
-	for _, id := range cands {
+	for id := 40; id >= 0 && s == nil; id-- {
 		f, err := os.OpenFile(fmt.Sprintf("/scheme/pty/%d", id), os.O_RDWR, 0)
 		if err != nil {
 			continue
 		}
 		m.WriteString("probe\n")
-		if got, err := readWithin(f, 500*time.Millisecond); err == nil && got == "probe\n" {
+		if got, err := readWithin(f, 400*time.Millisecond); err == nil && got == "probe\n" {
 			s = f
 			break
 		}
