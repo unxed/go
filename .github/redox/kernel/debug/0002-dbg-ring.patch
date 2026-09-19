@@ -1,4 +1,4 @@
-From 79a0d7e2fd09c3795fe702c3e23591832b720ab2 Mon Sep 17 00:00:00 2001
+From acc7a887a13b615faee2deded373c1ec2c1db4eb Mon Sep 17 00:00:00 2001
 From: unxed <ivan.sorokin.tech@gmail.com>
 Date: Sat, 19 Sep 2026 09:55:03 +0000
 Subject: [PATCH] DEBUG: lock-free per-CPU event ring + no-progress watchdog
@@ -8,12 +8,12 @@ Subject: [PATCH] DEBUG: lock-free per-CPU event ring + no-progress watchdog
  src/context/context.rs |   3 +
  src/context/mod.rs     |   7 +++
  src/context/switch.rs  |  18 ++++++
- src/dbgring.rs         | 128 +++++++++++++++++++++++++++++++++++++++++
+ src/dbgring.rs         | 129 +++++++++++++++++++++++++++++++++++++++++
  src/main.rs            |   3 +
  src/panic.rs           |   2 +
- src/scheme/proc.rs     |   1 +
+ src/scheme/proc.rs     |   6 ++
  src/syscall/process.rs |  12 ++++
- 8 files changed, 174 insertions(+)
+ 8 files changed, 180 insertions(+)
  create mode 100644 src/dbgring.rs
 
 diff --git a/src/context/context.rs b/src/context/context.rs
@@ -123,10 +123,10 @@ index e4f6cac..491a9b8 100644
      // thus check if it has been removed, and if so reinsert it to the fast wakeup queue.
 diff --git a/src/dbgring.rs b/src/dbgring.rs
 new file mode 100644
-index 0000000..5509da3
+index 0000000..db888e8
 --- /dev/null
 +++ b/src/dbgring.rs
-@@ -0,0 +1,128 @@
+@@ -0,0 +1,129 @@
 +//! DEBUG: lock-free per-CPU event ring for hunting context-switch bugs. No formatting in the hot
 +//! path: an event is a few stores. Dumped from the panic path and by a "no progress" watchdog.
 +use alloc::sync::Arc;
@@ -176,6 +176,7 @@ index 0000000..5509da3
 +pub const PICK: u8 = 11; // a = picked id (or 0 = none) , b = prev sched id
 +pub const DIRECT_BACK: u8 = 12; // a = current id
 +pub const EXCEPTION: u8 = 13; // a = id
++pub const TRYSTOP_END: u8 = 14; // a = id, b = status now <<8 | saved status being restored
 +
 +#[inline(always)]
 +pub fn ev(code: u8, a: u64, b: u64) {
@@ -283,10 +284,22 @@ index ded62e6..db54cfc 100644
      unsafe {
          stack_trace();
 diff --git a/src/scheme/proc.rs b/src/scheme/proc.rs
-index d82c573..56d1f33 100644
+index d82c573..0d3b093 100644
 --- a/src/scheme/proc.rs
 +++ b/src/scheme/proc.rs
-@@ -1328,6 +1328,7 @@ impl ContextHandle {
+@@ -93,6 +93,11 @@ fn try_stop_context<T>(
+     let (context, l4_token) = guard.token_split();
+     let ret = callback(context, l4_token);
+ 
++    crate::dbgring::ev(
++        crate::dbgring::TRYSTOP_END,
++        context.debug_id as u64,
++        (crate::dbgring::st_code(&context.status) << 8) | crate::dbgring::st_code(&prev_status),
++    );
+     context.status = prev_status;
+ 
+     let cpu_id = context.cpu_id;
+@@ -1328,6 +1333,7 @@ impl ContextHandle {
                              let cpu_id = {
                                  let mut ctxt = context.write(token.token());
                                  //trace!("FORCEKILL NONSELF={} {}, SELF={}", ctxt.debug_id, ctxt.pid, context::current().read().debug_id);

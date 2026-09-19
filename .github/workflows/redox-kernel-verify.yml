@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [stock, baseline, both, ring]
+        variant: [baseline, fix, all, ring]
         rep: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +49,8 @@ jobs:
             both)    git am -3 $K/0001-*.patch $K/0002-*.patch ;;
             dbg)     git am -3 $K/debug/0001-*.patch ;;
             ring)    git am -3 $K/debug/0002-*.patch ;;
+            fix)     git am -3 $K/0003-*.patch ;;
+            all)     git am -3 $K/0001-*.patch $K/0002-*.patch $K/0003-*.patch ;;
           esac
           git log --oneline -3; git diff --stat 2d2eef7 | tail -3
           make ARCH=x86_64 OBJCOPY=objcopy BUILD=/tmp/kbuild all 2>&1 | tail -15
