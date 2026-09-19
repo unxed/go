@@ -26,8 +26,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [dbg]
-        rep: [1, 2, 3, 4, 5, 6]
+        variant: [baseline, both]
+        rep: [1, 2]
     steps:
       - uses: actions/checkout@v4
 
