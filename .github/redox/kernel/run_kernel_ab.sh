@@ -1,7 +1,7 @@
 . /root/mnt/common.sh
 if [ "$1" = dbg ]; then
   # debug kernel: only the spawn stress, as long as it takes to wedge (DBGDEAD lines say why)
-  /root/mnt/x36_heartbeat_c.bin &
+  # (a heartbeat process, x36, hides the wedge: 0 of 2 boots froze with it, 4 of 4 without)
   loop_run /root/mnt/x27_spawnpar_c.bin default 80 60
   echo "=== LADDER DONE"
   exit 0
