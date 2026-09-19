@@ -82,7 +82,7 @@ jobs:
           path: |
             bin
             pkg
-          key: redox-toolchain-v2-${{ hashFiles('src/**', 'VERSION') }}
+          key: redox-toolchain-v3-${{ hashFiles('src/**', 'VERSION') }}
 
       - name: Cache the go build cache
         uses: actions/cache@v4
@@ -92,7 +92,7 @@ jobs:
           restore-keys: redox-gocache-
 
       - name: Build host (linux/amd64) toolchain
-        if: steps.tc.outputs.cache-hit != 'true'
+        if: steps.tc.outputs.cache-hit != 'true' || hashFiles('genfiles.tgz') == ''
         timeout-minutes: 4
         working-directory: src
         run: |
@@ -106,7 +106,7 @@ jobs:
           tar tzf genfiles.tgz | head -20
 
       - name: Restore generated sources of the cached toolchain
-        if: steps.tc.outputs.cache-hit == 'true'
+        if: steps.tc.outputs.cache-hit == 'true' && hashFiles('genfiles.tgz') != ''
         run: tar xzf genfiles.tgz && tar tzf genfiles.tgz | wc -l
 
       # Bulk compile check of the std packages we care about, reporting ALL
