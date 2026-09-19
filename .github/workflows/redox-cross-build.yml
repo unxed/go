@@ -82,7 +82,7 @@ jobs:
           path: |
             bin
             pkg
-          key: redox-toolchain-${{ hashFiles('src/**', 'VERSION') }}
+          key: redox-toolchain-v2-${{ hashFiles('src/**', 'VERSION') }}
 
       - name: Cache the go build cache
         uses: actions/cache@v4
