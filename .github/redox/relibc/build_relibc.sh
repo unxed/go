@@ -20,7 +20,7 @@ redoxer env sh -c 'echo PATH=$PATH; which x86_64-unknown-redox-gcc; rustc --vers
 if redoxer env make -j2 PROFILE=release libs > /src/build1.log 2>&1; then
   echo "=== relibc built with the redoxer toolchain"
 else
-  echo "=== attempt 1 (redoxer toolchain) failed; tail of log:"; tail -40 /src/build1.log
+  echo "=== attempt 1 (redoxer toolchain) failed; errors and tail of log:"; grep -n -i "error\|\*\*\*\|undefined\|cannot" /src/build1.log | grep -v "^.*WARN" | tail -25; tail -15 /src/build1.log
   date
   rustup toolchain install nightly-2026-05-24 --profile minimal -c rust-src
   if redoxer env make -j2 PROFILE=release CARGO="rustup run nightly-2026-05-24 cargo" libs > /src/build2.log 2>&1; then
