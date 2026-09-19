@@ -5,7 +5,8 @@ name: redox-kernel-verify
 #   stock     the kernel shipped in redoxer's image, untouched
 #   baseline  Redox kernel master, built here, unpatched
 #   patched   the same source + .github/redox/kernel/0001-futex-don-t-sleep-on-an-untimed-wait-when-the-contex.patch
-# Each boots under redoxer and runs the pure-C reproducer x17 (no Go involved).
+# Variants: baseline (master), patched (0001, ForceKill), cow (0002, futex waiters woken when a CoW
+# fault moves the page), both. Each boots under redoxer and runs the pure-C reproducer x17 (no Go involved).
 on:
   push:
     branches: [golang-1.26-redox]
@@ -25,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [stock, baseline, patched]
+        variant: [baseline, patched, cow, both]
         rep: [1, 2]
     steps:
       - uses: actions/checkout@v4
@@ -40,11 +41,14 @@ jobs:
           git init -q . && git remote add origin https://gitlab.redox-os.org/redox-os/kernel.git
           git fetch -q --depth 1 origin $KERNEL_SHA && git checkout -q FETCH_HEAD
           git log --oneline -1
-          if [ "${{ matrix.variant }}" = patched ]; then
-            git apply --check $GITHUB_WORKSPACE/.github/redox/kernel/0001-futex-don-t-sleep-on-an-untimed-wait-when-the-contex.patch
-            git apply $GITHUB_WORKSPACE/.github/redox/kernel/0001-futex-don-t-sleep-on-an-untimed-wait-when-the-contex.patch
-            git diff --stat
-          fi
+          K=$GITHUB_WORKSPACE/.github/redox/kernel
+          git config user.name ci && git config user.email ci@example.com
+          case "${{ matrix.variant }}" in
+            patched) git am -3 $K/0001-*.patch ;;
+            cow)     git am -3 $K/0002-*.patch ;;
+            both)    git am -3 $K/0001-*.patch $K/0002-*.patch ;;
+          esac
+          git log --oneline -3; git diff --stat 2d2eef7 | tail -3
           make ARCH=x86_64 OBJCOPY=objcopy BUILD=/tmp/kbuild all 2>&1 | tail -15
           ls -la /tmp/kbuild/kernel && sha1sum /tmp/kbuild/kernel
 
@@ -57,6 +61,10 @@ jobs:
           docker run --rm -v /tmp:/tmp -w /tmp redoxos/redoxer redoxer cc -O1 -pthread \
             -o /tmp/pkg/out/x17_exit_c.bin /tmp/x17.c
           sudo chmod +x /tmp/pkg/out/x17_exit_c.bin
+          cp $GITHUB_WORKSPACE/.github/redox/ladder/x23_futex_fork_c/main.c /tmp/x23.c
+          docker run --rm -v /tmp:/tmp -w /tmp redoxos/redoxer redoxer cc -O1 -pthread \
+            -o /tmp/pkg/out/x23_futex_fork_c.bin /tmp/x23.c
+          sudo chmod +x /tmp/pkg/out/x23_futex_fork_c.bin
           cp $GITHUB_WORKSPACE/.github/redox/ladder/x27_spawnpar_c/main.c /tmp/x27.c
           docker run --rm -v /tmp:/tmp -w /tmp redoxos/redoxer redoxer cc -O1 -pthread \
             -o /tmp/pkg/out/x27_spawnpar_c.bin /tmp/x27.c
