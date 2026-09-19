@@ -1,17 +1,17 @@
-From 7663e25f11398dcdd0705ffbd5af4f2b970ac5d8 Mon Sep 17 00:00:00 2001
+From 9223021f3d469bc67e59e6e0bae3fcd232a4779b Mon Sep 17 00:00:00 2001
 From: unxed <ivan.sorokin.tech@gmail.com>
 Date: Sat, 19 Sep 2026 08:37:06 +0000
 Subject: [PATCH] DEBUG: report why a dead context keeps running after
  context::switch
 
 ---
- src/context/switch.rs  | 52 ++++++++++++++++++++++++++++++++++++++++++
- src/cpu_stats.rs       |  4 ++++
- src/syscall/process.rs | 17 +++++++++++++-
- 3 files changed, 72 insertions(+), 1 deletion(-)
+ src/context/switch.rs  | 65 ++++++++++++++++++++++++++++++++++++++++++
+ src/cpu_stats.rs       |  4 +++
+ src/syscall/process.rs | 17 ++++++++++-
+ 3 files changed, 85 insertions(+), 1 deletion(-)
 
 diff --git a/src/context/switch.rs b/src/context/switch.rs
-index e4f6cac..752f34e 100644
+index e4f6cac..f18cc57 100644
 --- a/src/context/switch.rs
 +++ b/src/context/switch.rs
 @@ -187,12 +187,47 @@ pub fn switch(token: &mut CleanLockToken) -> SwitchResult {
@@ -100,6 +100,33 @@ index e4f6cac..752f34e 100644
      SwitchResult::Switched
  }
  enum ScheduleResult {
+@@ -1135,6 +1187,7 @@ pub fn direct_switch_to(
+ // - percpu must be the current hardware thread's
+ // - prev_context_guard must be a write guard of the current context
+ // - addr_space_guard must be a guard of the next context's addrsp
++#[track_caller]
+ unsafe fn switch_to(
+     percpu: &PercpuBlock,
+     mut prev_context_guard: ArcRwLockWriteGuard<L4, Context>,
+@@ -1143,6 +1196,18 @@ unsafe fn switch_to(
+     switch_time: u128,
+     was_idle: bool,
+ ) {
++    if matches!(next_context_guard.status, context::Status::Dead { .. }) {
++        println!(
++            "DBGDEAD: switch_to NEXT is DEAD: next id={} name={} status={:?} prev id={} prev status={:?} cpu={} caller={}",
++            next_context_guard.debug_id,
++            next_context_guard.name.as_str(),
++            next_context_guard.status,
++            prev_context_guard.debug_id,
++            prev_context_guard.status,
++            percpu.cpu_id.get(),
++            core::panic::Location::caller()
++        );
++    }
+     // When direct-switching to contexts present on a different CPU's runqueue, the current context
+     // can get removed from that runqueue (as it was already running) and hence *all* runqueues. We
+     // thus check if it has been removed, and if so reinsert it to the fast wakeup queue.
 diff --git a/src/cpu_stats.rs b/src/cpu_stats.rs
 index aa02fd4..98316e6 100644
 --- a/src/cpu_stats.rs
