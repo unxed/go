@@ -27,7 +27,7 @@ jobs:
       fail-fast: false
       matrix:
         variant: [dbg]
-        rep: [1, 2, 3, 4]
+        rep: [1, 2]
     steps:
       - uses: actions/checkout@v4
 
@@ -66,6 +66,10 @@ jobs:
           docker run --rm -v /tmp:/tmp -w /tmp redoxos/redoxer redoxer cc -O1 -pthread \
             -o /tmp/pkg/out/x23_futex_fork_c.bin /tmp/x23.c
           sudo chmod +x /tmp/pkg/out/x23_futex_fork_c.bin
+          cp $GITHUB_WORKSPACE/.github/redox/ladder/x36_heartbeat_c/main.c /tmp/x36.c
+          docker run --rm -v /tmp:/tmp -w /tmp redoxos/redoxer redoxer cc -O1 \
+            -o /tmp/pkg/out/x36_heartbeat_c.bin /tmp/x36.c
+          sudo chmod +x /tmp/pkg/out/x36_heartbeat_c.bin
           cp $GITHUB_WORKSPACE/.github/redox/ladder/x34_spawn_fail_c/main.c /tmp/x34.c
           docker run --rm -v /tmp:/tmp -w /tmp redoxos/redoxer redoxer cc -O1 -pthread \
             -o /tmp/pkg/out/x34_spawn_fail_c.bin /tmp/x34.c
