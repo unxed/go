@@ -24,3 +24,14 @@ procmgr `UB`.
 v2 (`Context::block()` refusing sigkilled contexts) verified the same hang counts but panicked the kernel
 in the concurrent-spawn stress `x27_spawnpar_c` (run 35409694501: patched 2/2 panics at run 18, stock and
 master 0/4). v3 is futex-only; see the table below once run for v3 completes.
+
+### v3 results (run 35410254114, KVM, 4 CPUs, x27 x40 first, then x17)
+
+| kernel | rep | x27 (40 x 4 spawns) | x17 `exit()` hangs /60 | x17 `_exit` hangs /30 |
+|---|---|---|---|---|
+| stock | 1 | ok | 3 | 0 |
+| stock | 2 | froze after an UNHANDLED EXCEPTION of a spawned child (run 13) | - | - |
+| master, unpatched | 1 | ok | 22 | 8 |
+| master, unpatched | 2 | ok | 6 | 4 |
+| patched v3 | 1 | KERNEL PANIC process.rs:83 (run 21) | - | - |
+| patched v3 | 2 | ok | **0** | **0** |
