@@ -99,6 +99,15 @@ jobs:
           export GOROOT_BOOTSTRAP=$(dirname $(dirname $(which go)))
           echo "GOROOT_BOOTSTRAP=$GOROOT_BOOTSTRAP"
           ./make.bash
+          # make.bash also writes untracked generated sources (zzipdata.go, zbootstrap.go, ...):
+          # keep them with the cached toolchain
+          cd ..
+          git ls-files --others -i --exclude-standard src | tar czf genfiles.tgz -T -
+          tar tzf genfiles.tgz | head -20
+
+      - name: Restore generated sources of the cached toolchain
+        if: steps.tc.outputs.cache-hit == 'true'
+        run: tar xzf genfiles.tgz && tar tzf genfiles.tgz | wc -l
 
       # Bulk compile check of the std packages we care about, reporting ALL
       # errors (-e) across independent packages in one round.
