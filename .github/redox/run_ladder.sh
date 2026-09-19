@@ -34,6 +34,7 @@ run_one /root/mnt/x19_clock.bin default 1 60
 run_one /root/mnt/x23_futex_fork_c.bin default 1 60
 run_one /root/mnt/x27_spawnpar_c.bin default 1 60
 run_one /root/mnt/x26_spawn_cloexec_c.bin default 1 30
+run_one /root/mnt/x31_spawn_actions_c.bin default 1 30
 run_one /root/mnt/x18_fork_c.bin default 1
 run_one /root/mnt/x22_forkpar_c.bin default 1
 run_one /root/mnt/x20_execpar.bin default 1
