@@ -1,0 +1,137 @@
+name: redox-relibc-patches
+
+# A/B verification of the relibc patches in .github/redox/relibc/patches/ (applied together, they
+# touch different files): relibc at the pinned upstream commit, unpatched vs patched, built in the
+# redoxer environment; pure-C repros are linked against each build's libc.so as their ELF
+# interpreter and run in a KVM VM.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [golang-1.26-redox]
+    paths:
+      - '.github/workflows/redox-relibc-patches.yml'
+      - '.github/redox/relibc/patches/**'
+      - '.github/redox/run_relibc_ab.sh'
+      - '.github/redox/relibc_ab_summary.py'
+      - '.github/redox/ladder/x26_spawn_cloexec_c/**'
+      - '.github/redox/ladder/x27_spawnpar_c/**'
+      - '.github/redox/ladder/x32_poll_regular_c/**'
+      - '.github/redox/ladder/x33_thread_sigmask_c/**'
+
+permissions:
+  contents: read
+
+env:
+  RELIBC_COMMIT: 69bb008af1f6d93758631cf0df250500d53a065b
+
+jobs:
+  relibc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [unpatched, patched]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull redoxer image
+        timeout-minutes: 4
+        run: docker pull redoxos/redoxer
+      - name: Fetch relibc at the pinned upstream commit
+        timeout-minutes: 4
+        run: |
+          mkdir relibc && cd relibc
+          git init -q
+          git remote add origin https://gitlab.redox-os.org/redox-os/relibc.git
+          git fetch --depth 1 origin "$RELIBC_COMMIT"
+          git checkout -q FETCH_HEAD
+          git submodule update --init --recursive --depth 1
+          git log -1 --format='%H %s'
+      - name: Apply the patches (patched variant only)
+        if: matrix.variant == 'patched'
+        run: |
+          cd relibc
+          git config user.name ci && git config user.email ci@example.com
+          for p in ../.github/redox/relibc/patches/*.patch; do echo "== $p"; git am "$p"; done
+          git log --oneline -5; git diff --stat 69bb008 | tail -3
+      - name: Build relibc inside the redoxer environment
+        timeout-minutes: 12
+        run: |
+          docker run --rm -v "$PWD/relibc:/src" -v "$PWD/.github/redox/relibc:/scripts:ro" redoxos/redoxer \
+            sh /scripts/build_relibc.sh 2>&1 | tee build-${{ matrix.variant }}.log
+      - name: Collect libc.so
+        if: always()
+        run: |
+          mkdir -p out/${{ matrix.variant }}
+          B=relibc/target/x86_64-unknown-redox/release
+          cp $B/libc.so out/${{ matrix.variant }}/libc.so
+          cp $B/libc.so out/${{ matrix.variant }}/libc.so.6
+          cp $B/libc.so out/${{ matrix.variant }}/ld64.so.1
+          sha256sum out/${{ matrix.variant }}/libc.so
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relibc-${{ matrix.variant }}
+          path: |
+            out/${{ matrix.variant }}
+            build-${{ matrix.variant }}.log
+          if-no-files-found: warn
+
+  repros:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the C repros once per variant (custom ELF interpreter)
+        timeout-minutes: 5
+        run: |
+          docker pull redoxos/redoxer >/dev/null
+          mkdir -p /tmp/w/bins && cp -r .github/redox/ladder/x26_spawn_cloexec_c .github/redox/ladder/x27_spawnpar_c .github/redox/ladder/x32_poll_regular_c .github/redox/ladder/x33_thread_sigmask_c /tmp/w/
+          for v in unpatched patched; do
+            for p in x26_spawn_cloexec_c x27_spawnpar_c x32_poll_regular_c x33_thread_sigmask_c; do
+              docker run --rm -v /tmp:/tmp -w /tmp/w redoxos/redoxer redoxer cc -O1 -pthread \
+                -Wl,--dynamic-linker=/root/mnt/$v/ld64.so.1 -o bins/${p}_$v.bin $p/main.c
+            done
+          done
+          sudo chmod +x /tmp/w/bins/*; ls -la /tmp/w/bins
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repro-bins
+          path: /tmp/w/bins
+
+  verify:
+    needs: [relibc, repros]
+    if: always() && needs.repros.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+      - name: Enable KVM
+        run: .github/redox/enable_kvm.sh
+      - name: Assemble the VM folder
+        run: |
+          mkdir -p vm/bins
+          cp art/repro-bins/* vm/bins/
+          for v in unpatched patched; do
+            d=$(find art/relibc-$v -type d -name $v | head -1)
+            [ -n "$d" ] && cp -r "$d" vm/$v || echo "no libc for $v"
+          done
+          chmod +x vm/bins/* vm/unpatched/* vm/patched/* || true
+          cp .github/redox/run_relibc_ab.sh vm/
+      - name: Run in a Redox VM
+        timeout-minutes: 8
+        continue-on-error: true
+        run: |
+          PKGOUT=$PWD/vm .github/redox/vm_run.sh run_relibc_ab.sh /tmp/relibc-ab.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relibc-ab-log
+          path: /tmp/relibc-ab.log
+          if-no-files-found: ignore
+      - name: Summary
+        if: always()
+        run: python3 .github/redox/relibc_ab_summary.py /tmp/relibc-ab.log
