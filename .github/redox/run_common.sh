@@ -40,6 +40,19 @@ run_one() {
       kill -QUIT $1 2>&1
       sleep 3
     fi
+    # kernel-side view (only kernels built with kernel/debug/000[23]-*ring*.patch have it): the
+    # first 3 hangs of a boot
+    if [ -e /scheme/sys/dbgring ]; then
+      nh=`cat /tmp/nhang 2>/dev/null || echo 0`
+      if [ $nh -lt 3 ]; then
+        echo $((nh+1)) > /tmp/nhang
+        echo "--- /scheme/sys/dbgring (hang #$((nh+1)))"
+        cat /scheme/sys/dbgring 2>&1
+        echo "--- full context table"
+        cat /scheme/sys/context 2>&1
+        echo "--- end dbgring"
+      fi
+    fi
     kill -9 $sp 2>/dev/null
     rc=hang
   fi

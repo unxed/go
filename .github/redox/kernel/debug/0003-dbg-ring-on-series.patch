@@ -1,0 +1,442 @@
+From 11648731015bc7f2e9377b6dd535f7638aba7dfb Mon Sep 17 00:00:00 2001
+From: unxed <ivan.sorokin.tech@gmail.com>
+Date: Sat, 19 Sep 2026 09:55:03 +0000
+Subject: [PATCH] DEBUG: lock-free per-CPU event ring + no-progress watchdog
+ for context-switch bugs
+
+---
+ src/context/context.rs         |   3 +
+ src/context/mod.rs             |   7 ++
+ src/context/switch.rs          |  21 +++++
+ src/dbgring.rs                 | 166 +++++++++++++++++++++++++++++++++
+ src/main.rs                    |   3 +
+ src/panic.rs                   |   2 +
+ src/scheme/proc.rs             |   6 ++
+ src/scheme/sys/dbgring_file.rs |   7 ++
+ src/scheme/sys/mod.rs          |   2 +
+ src/syscall/process.rs         |  12 +++
+ 10 files changed, 229 insertions(+)
+ create mode 100644 src/dbgring.rs
+ create mode 100644 src/scheme/sys/dbgring_file.rs
+
+diff --git a/src/context/context.rs b/src/context/context.rs
+index 4032c34..95f918a 100644
+--- a/src/context/context.rs
++++ b/src/context/context.rs
+@@ -276,13 +276,16 @@ impl Context {
+         if self.status.is_runnable() {
+             self.status = Status::Blocked;
+             self.status_reason = reason;
++            crate::dbgring::ev(crate::dbgring::BLOCK, self.debug_id as u64, 1);
+             true
+         } else {
++            crate::dbgring::ev(crate::dbgring::BLOCK, self.debug_id as u64, 0);
+             false
+         }
+     }
+ 
+     pub fn hard_block(&mut self, reason: HardBlockedReason) -> bool {
++        crate::dbgring::ev(crate::dbgring::HARDBLOCK, self.debug_id as u64, 0);
+         if self.status.is_runnable() {
+             self.status = Status::HardBlocked { reason };
+ 
+diff --git a/src/context/mod.rs b/src/context/mod.rs
+index 86ec64b..fe8021e 100644
+--- a/src/context/mod.rs
++++ b/src/context/mod.rs
+@@ -129,6 +129,7 @@ pub fn contexts_mut(token: LockToken<'_, L1>) -> RwLockWriteGuard<'_, L2, BTreeS
+ pub fn unblock_context(context_lock: &Arc<ContextLock>, token: &mut LockToken<'_, L3>) -> bool {
+     let cpu_id = {
+         let mut guard = context_lock.write(token.token());
++        crate::dbgring::ev(crate::dbgring::UNBLOCK, guard.debug_id as u64, crate::dbgring::st_code(&guard.status));
+         if !guard.unblock_no_ipi() {
+             let guard_runnable = guard.status.is_runnable();
+             let guard_cpu_id = guard.cpu_id;
+@@ -154,6 +155,12 @@ pub fn wakeup_context(
+ ) {
+     let weak = WeakContextRef(Arc::downgrade(context_lock));
+     let curr_cpu = crate::cpu_id();
++    // a = address of the context lock (matches "ptr=" in the context dump), b = target cpu
++    crate::dbgring::ev(
++        crate::dbgring::WAKEUP,
++        Arc::as_ptr(context_lock) as usize as u64,
++        cpu_id.map_or(255, |c| c.get() as u64),
++    );
+ 
+     let target_cpu = cpu_id.unwrap_or(curr_cpu);
+ 
+diff --git a/src/context/switch.rs b/src/context/switch.rs
+index 7b09e9d..4cb1bd4 100644
+--- a/src/context/switch.rs
++++ b/src/context/switch.rs
+@@ -120,6 +120,9 @@ pub fn tick(token: &mut CleanLockToken) {
+     let new_ticks = ticks_cell.get() + 1;
+     ticks_cell.set(new_ticks);
+ 
++    // DEBUG: no-progress watchdog from the timer tick (also fires when CPUs never go idle)
++    crate::dbgring::watchdog(crate::time::monotonic(token));
++
+     // Trigger a context switch after every 3 ticks (approx. 6.75 ms).
+     if new_ticks >= TICK_INTERVAL as usize {
+         switch(token);
+@@ -193,6 +196,7 @@ fn switch_inner(
+     token: &mut CleanLockToken,
+ ) -> SwitchResult {
+     if try_direct_switch_back(percpu, schedule_time, token) {
++        crate::dbgring::ev(crate::dbgring::DIRECT_BACK, 0, 0);
+         return SwitchResult::Switched;
+     }
+ 
+@@ -211,6 +215,12 @@ fn switch_inner(
+             ),
+             // didn't change sched context, so will not change current context
+             ScheduleResult::AllContextsIdle => {
++                crate::dbgring::ev(
++                    crate::dbgring::IDLE_RET,
++                    percpu.switch_internals.queue_len.load(Ordering::Relaxed) as u64,
++                    0,
++                );
++                crate::dbgring::watchdog(schedule_time);
+                 percpu.stats.set_state(cpu_stats::CpuState::Idle);
+ 
+                 return SwitchResult::AllContextsIdle;
+@@ -233,6 +243,7 @@ fn switch_inner(
+             .switch_internals
+             .being_sigkilled
+             .set(next_sched_guard.being_sigkilled);
++        crate::dbgring::ev(crate::dbgring::EARLY_SAME, next_sched_guard.debug_id as u64, 0);
+         return SwitchResult::Switched;
+     }
+     let current_context_guard = if Arc::ptr_eq(
+@@ -477,8 +488,10 @@ fn schedule(
+         was_idle,
+         &mut prev_context_guard,
+     ) else {
++        crate::dbgring::ev(crate::dbgring::PICK, 0, prev_context_guard.debug_id as u64);
+         return ScheduleResult::AllContextsIdle;
+     };
++    crate::dbgring::ev(crate::dbgring::PICK, next_sched_context.debug_id as u64, prev_context_guard.debug_id as u64);
+ 
+     *percpu.switch_internals.sched_ctxt.borrow_mut() = Some(Arc::clone(
+         ArcContextLockWriteGuard::rwlock(&next_sched_context),
+@@ -1151,6 +1164,14 @@ unsafe fn switch_to(
+     switch_time: u128,
+     was_idle: bool,
+ ) {
++    crate::dbgring::ev(
++        crate::dbgring::SWITCH_TO,
++        ((prev_context_guard.debug_id as u64) << 32) | next_context_guard.debug_id as u64,
++        (crate::dbgring::st_code(&prev_context_guard.status) << 8) | crate::dbgring::st_code(&next_context_guard.status),
++    );
++    if !Arc::ptr_eq(ArcRwLockWriteGuard::rwlock(&next_context_guard), &*percpu.switch_internals.idle_context()) {
++        crate::dbgring::PROGRESS.fetch_add(1, Ordering::Relaxed);
++    }
+     // When direct-switching to contexts present on a different CPU's runqueue, the current context
+     // can get removed from that runqueue (as it was already running) and hence *all* runqueues. We
+     // thus check if it has been removed, and if so reinsert it to the fast wakeup queue.
+diff --git a/src/dbgring.rs b/src/dbgring.rs
+new file mode 100644
+index 0000000..543ca4a
+--- /dev/null
++++ b/src/dbgring.rs
+@@ -0,0 +1,166 @@
++//! DEBUG: lock-free per-CPU event ring for hunting context-switch bugs. No formatting in the hot
++//! path: an event is a few stores. Dumped from the panic path and by a "no progress" watchdog.
++use alloc::sync::Arc;
++use core::{
++    cell::UnsafeCell,
++    sync::atomic::{AtomicBool, AtomicU64, Ordering},
++};
++
++pub const NEV: usize = 2048;
++const NCPU: usize = 8;
++
++#[derive(Clone, Copy)]
++pub struct Ev {
++    pub seq: u64,
++    pub a: u64,
++    pub b: u64,
++    pub code: u8,
++}
++const EV0: Ev = Ev { seq: 0, a: 0, b: 0, code: 0 };
++
++pub struct Ring {
++    ev: UnsafeCell<[Ev; NEV]>,
++    head: AtomicU64,
++}
++unsafe impl Sync for Ring {}
++#[allow(clippy::declare_interior_mutable_const)]
++const R0: Ring = Ring { ev: UnsafeCell::new([EV0; NEV]), head: AtomicU64::new(0) };
++static RINGS: [Ring; NCPU] = [R0; NCPU];
++static SEQ: AtomicU64 = AtomicU64::new(1);
++static DUMPED: AtomicBool = AtomicBool::new(false);
++/// Bumped on every switch to a non-idle context (progress indicator for the watchdog).
++pub static PROGRESS: AtomicU64 = AtomicU64::new(0);
++static LAST_PROGRESS: AtomicU64 = AtomicU64::new(0);
++static LAST_CHANGE_NS: AtomicU64 = AtomicU64::new(0);
++
++// event codes
++pub const SWITCH_TO: u8 = 1; // a = prev_id<<32|next_id, b = prev_st<<8|next_st
++pub const DEAD_SET: u8 = 2; // a = id
++pub const UNBLOCK: u8 = 3; // a = id, b = status code seen | result<<8
++pub const WAKEUP: u8 = 4; // a = id, b = target cpu (or 255)
++pub const BLOCK: u8 = 5; // a = id, b = 1 if it really blocked
++pub const HARDBLOCK: u8 = 6; // a = id
++pub const IDLE_RET: u8 = 7; // a = queue_len, b = sched id
++pub const EARLY_SAME: u8 = 8; // a = current id
++pub const EXIT_STEP: u8 = 9; // a = id, b = step
++pub const FORCEKILL: u8 = 10; // a = target id, b = old status code
++pub const PICK: u8 = 11; // a = picked id (or 0 = none) , b = prev sched id
++pub const DIRECT_BACK: u8 = 12; // a = current id
++pub const EXCEPTION: u8 = 13; // a = id
++pub const HANDLE_CLOSE: u8 = 15; // a = context id of the proc-scheme handle being closed, b = kind
++pub const TRYSTOP_END: u8 = 14; // a = id, b = status now <<8 | saved status being restored
++
++#[inline(always)]
++pub fn ev(code: u8, a: u64, b: u64) {
++    let cpu = (crate::cpu_id().get() as usize).min(NCPU - 1);
++    let r = &RINGS[cpu];
++    let i = r.head.fetch_add(1, Ordering::Relaxed) as usize % NEV;
++    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
++    unsafe {
++        (*r.ev.get())[i] = Ev { seq, a, b, code };
++    }
++}
++
++pub fn st_code(s: &crate::context::Status) -> u64 {
++    use crate::context::Status::*;
++    match s {
++        Runnable => 1,
++        Blocked => 2,
++        HardBlocked { .. } => 3,
++        Dead { .. } => 4,
++    }
++}
++
++/// Print the last `per_cpu` events of every CPU (lines "R seq cpu code a b"; sort by seq).
++pub fn dump(reason: &str, per_cpu: usize) {
++    if DUMPED.swap(true, Ordering::SeqCst) {
++        return;
++    }
++    println!("DBGRING-BEGIN {}", reason);
++    for (cpu, r) in RINGS.iter().enumerate() {
++        let head = r.head.load(Ordering::Relaxed) as usize;
++        let n = per_cpu.min(head).min(NEV);
++        for k in 0..n {
++            let i = (head - 1 - k) % NEV;
++            let e = unsafe { (*r.ev.get())[i] };
++            println!("R {} {} {} {:x} {:x}", e.seq, cpu, e.code, e.a, e.b);
++        }
++    }
++    println!("DBGRING-END");
++}
++
++/// Called on every CPU tick that found nothing to run; if no context switch to a non-idle
++/// context happened for ~15 s, dump the ring and the state of all contexts, once.
++pub fn watchdog(now_ns: u128) {
++    // (called from the timer tick of every CPU and from the idle path)
++    let now = now_ns as u64;
++    let p = PROGRESS.load(Ordering::Relaxed);
++    if p != LAST_PROGRESS.load(Ordering::Relaxed) {
++        LAST_PROGRESS.store(p, Ordering::Relaxed);
++        LAST_CHANGE_NS.store(now, Ordering::Relaxed);
++        return;
++    }
++    let last = LAST_CHANGE_NS.load(Ordering::Relaxed);
++    if last == 0 {
++        LAST_CHANGE_NS.store(now, Ordering::Relaxed);
++        return;
++    }
++    if now.saturating_sub(last) > 12_000_000_000 && !DUMPED.load(Ordering::Relaxed) {
++        dump("watchdog: no switch to a non-idle context for 15 s", 120);
++        dump_contexts();
++    }
++}
++
++/// Text for /scheme/sys/dbgring: the last events of every CPU and the state of every context.
++pub fn render(per_cpu: usize) -> alloc::string::String {
++    use core::fmt::Write;
++    let mut out = alloc::string::String::new();
++    let _ = writeln!(out, "DBGRING-BEGIN sys file");
++    for (cpu, r) in RINGS.iter().enumerate() {
++        let head = r.head.load(Ordering::Relaxed) as usize;
++        let n = per_cpu.min(head).min(NEV);
++        for k in 0..n {
++            let i = (head - 1 - k) % NEV;
++            let e = unsafe { (*r.ev.get())[i] };
++            let _ = writeln!(out, "R {} {} {} {:x} {:x}", e.seq, cpu, e.code, e.a, e.b);
++        }
++    }
++    let _ = writeln!(out, "DBGRING-END");
++    let mut token = unsafe { crate::sync::CleanLockToken::new() };
++    let mut token2 = unsafe { crate::sync::CleanLockToken::new() };
++    let _ = writeln!(out, "DBGCTX-BEGIN");
++    let ctxs = crate::context::contexts(token.downgrade());
++    for c in ctxs.iter() {
++        let lock = &c.0;
++        if let Some(g) = lock.try_read(token2.token()) {
++            let _ = writeln!(
++                out,
++                "C ptr={:x} id={} name={} status={:?} reason={} running={} sched={} cpu={:?} wake={:?} pid={} owner={:?} sigkilled={} files={}",
++                Arc::as_ptr(lock) as usize, g.debug_id, g.name.as_str(), g.status, g.status_reason, g.running, g.currently_scheduled, g.cpu_id, g.wake, g.pid, g.owner_proc_id, g.being_sigkilled, 0
++            );
++        } else {
++            let _ = writeln!(out, "C (locked)");
++        }
++    }
++    let _ = writeln!(out, "DBGCTX-END");
++    out
++}
++
++pub fn dump_contexts() {
++    let mut token = unsafe { crate::sync::CleanLockToken::new() };
++    let mut token2 = unsafe { crate::sync::CleanLockToken::new() };
++    println!("DBGCTX-BEGIN");
++    let ctxs = crate::context::contexts(token.downgrade());
++    for c in ctxs.iter() {
++        let lock = &c.0;
++        if let Some(g) = lock.try_read(token2.token()) {
++            println!(
++                "C ptr={:x} id={} name={} status={:?} reason={} running={} sched={} cpu={:?} wake={:?} pid={}",
++                Arc::as_ptr(lock) as usize, g.debug_id, g.name.as_str(), g.status, g.status_reason, g.running, g.currently_scheduled, g.cpu_id, g.wake, g.pid
++            );
++        } else {
++            println!("C (locked)");
++        }
++    }
++    println!("DBGCTX-END");
++}
+diff --git a/src/main.rs b/src/main.rs
+index a29621f..ca9023f 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -49,6 +49,9 @@ mod cpu_set;
+ /// Stats for the CPUs
+ mod cpu_stats;
+ 
++#[macro_use]
++mod dbgring;
++
+ /// Context management
+ mod context;
+ 
+diff --git a/src/panic.rs b/src/panic.rs
+index ded62e6..db54cfc 100644
+--- a/src/panic.rs
++++ b/src/panic.rs
+@@ -35,6 +35,8 @@ fn panic_handler(info: &PanicInfo) -> ! {
+ #[cfg_attr(test, expect(dead_code))]
+ fn panic_handler_inner(info: &PanicInfo) -> ! {
+     println!("KERNEL PANIC: {}", info);
++    crate::dbgring::dump("kernel panic", 200);
++    crate::dbgring::dump_contexts();
+ 
+     unsafe {
+         stack_trace();
+diff --git a/src/scheme/proc.rs b/src/scheme/proc.rs
+index b9006de..b8a14da 100644
+--- a/src/scheme/proc.rs
++++ b/src/scheme/proc.rs
+@@ -454,6 +454,11 @@ impl KernelScheme for ProcScheme {
+             .remove(&id)
+             .ok_or(Error::new(EBADF))?;
+ 
++        crate::dbgring::ev(
++            crate::dbgring::HANDLE_CLOSE,
++            handle.context.try_read(token.token()).map_or(0, |g| g.debug_id as u64),
++            0,
++        );
+         match handle {
+             Handle {
+                 context,
+@@ -1341,6 +1346,7 @@ impl ContextHandle {
+                             let cpu_id = {
+                                 let mut ctxt = context.write(token.token());
+                                 //trace!("FORCEKILL NONSELF={} {}, SELF={}", ctxt.debug_id, ctxt.pid, context::current().read().debug_id);
++                                crate::dbgring::ev(crate::dbgring::FORCEKILL, ctxt.debug_id as u64, crate::dbgring::st_code(&ctxt.status));
+                                 if ctxt.status.is_dead() {
+                                     return Ok(size_of::<usize>());
+                                 }
+diff --git a/src/scheme/sys/dbgring_file.rs b/src/scheme/sys/dbgring_file.rs
+new file mode 100644
+index 0000000..a7f1b24
+--- /dev/null
++++ b/src/scheme/sys/dbgring_file.rs
+@@ -0,0 +1,7 @@
++use alloc::vec::Vec;
++
++use crate::{sync::CleanLockToken, syscall::error::Result};
++
++pub fn resource(_token: &mut CleanLockToken) -> Result<Vec<u8>> {
++    Ok(crate::dbgring::render(150).into_bytes())
++}
+diff --git a/src/scheme/sys/mod.rs b/src/scheme/sys/mod.rs
+index fa44c95..bfdec77 100644
+--- a/src/scheme/sys/mod.rs
++++ b/src/scheme/sys/mod.rs
+@@ -26,6 +26,7 @@ use crate::{
+ use super::{CallerCtx, HandleMap, KernelScheme, OpenResult, StrOrBytes};
+ 
+ mod block;
++mod dbgring_file;
+ mod context;
+ mod cpu;
+ mod exe;
+@@ -69,6 +70,7 @@ static HANDLES: RwLock<L1, HandleMap<Handle>> = RwLock::new(HandleMap::new());
+ const FILES: &[(&str, Kind)] = &[
+     ("block", Rd(block::resource)),
+     ("context", Rd(context::resource)),
++    ("dbgring", Rd(dbgring_file::resource)),
+     ("cpu", Rd(cpu::resource)),
+     #[cfg(feature = "sys_fdstat")]
+     ("fdstat", Rd(fdstat::resource)),
+diff --git a/src/syscall/process.rs b/src/syscall/process.rs
+index a89f80b..6516fe0 100644
+--- a/src/syscall/process.rs
++++ b/src/syscall/process.rs
+@@ -35,6 +35,11 @@ use super::usercopy::UserSliceWo;
+ ///
+ pub fn exit_this_context(excp: Option<syscall::Exception>, token: &mut CleanLockToken) -> ! {
+     let context_lock = Arc::clone(&*context::current());
++    let dbg_id = context_lock.read(token.token()).debug_id as u64;
++    if excp.is_some() {
++        crate::dbgring::ev(crate::dbgring::EXCEPTION, dbg_id, 0);
++    }
++    crate::dbgring::ev(crate::dbgring::EXIT_STEP, dbg_id, 1);
+     let (addrspace_opt, mut close_files) = {
+         let mut context = context_lock.write(token.token());
+         let (context, token) = context.token_split();
+@@ -46,8 +51,10 @@ pub fn exit_this_context(excp: Option<syscall::Exception>, token: &mut CleanLock
+         (addrspace_opt, close_files)
+     };
+ 
++    crate::dbgring::ev(crate::dbgring::EXIT_STEP, dbg_id, 2);
+     // Files must be closed while context is valid so that messages can be passed
+     close_files.force_close_all(token);
++    crate::dbgring::ev(crate::dbgring::EXIT_STEP, dbg_id, 3);
+     if let Some(addrspace) = addrspace_opt {
+         if let Ok(addrspace) = Arc::try_unwrap(addrspace) {
+             addrspace.into_drop(token);
+@@ -57,6 +64,7 @@ pub fn exit_this_context(excp: Option<syscall::Exception>, token: &mut CleanLock
+     let owner = {
+         let mut guard = context_lock.write(token.token());
+         guard.status = context::Status::Dead { excp };
++        crate::dbgring::ev(crate::dbgring::DEAD_SET, dbg_id, 0);
+ 
+         guard.owner_proc_id
+     };
+@@ -79,7 +87,11 @@ pub fn exit_this_context(excp: Option<syscall::Exception>, token: &mut CleanLock
+         drop(context_ref);
+     }
+     drop(close_files);
++    crate::dbgring::ev(crate::dbgring::EXIT_STEP, dbg_id, 4);
+     context::switch(token);
++    crate::dbgring::ev(crate::dbgring::EXIT_STEP, dbg_id, 5);
++    crate::dbgring::dump("exit_this_context: switch returned", 200);
++    crate::dbgring::dump_contexts();
+     unreachable!();
+ }
+ 
+-- 
+2.43.0
+

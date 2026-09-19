@@ -1,7 +1,7 @@
 #!/bin/sh
 # usage: vm_run.sh <script-in-out-dir> <logfile> [kernel-file]
 #   out dir: $PKGOUT (default /tmp/pkg/out), copied by redoxer into the VM as /root/mnt/
-#   env: SMP (default 4), VM_TIMEOUT (default 240 s), VM_IDLE (default 45 s of silence => VM considered frozen)
+#   env: SMP (default 4), VM_TIMEOUT (default 240 s), VM_IDLE (default 120 s of silence => VM considered frozen; must exceed every in-guest run watchdog, currently <= 90 s, plus the hang dump time)
 # One QEMU boot under redoxer. KVM is used when the host has /dev/kvm (see
 # enable_kvm.sh; redoxer auto-detects it inside the container). With a kernel
 # file, redoxer's base image (a tar of the installed packages in ~/.redoxer) is
@@ -44,7 +44,7 @@ while kill -0 $dpid 2>/dev/null; do
   size=$(stat -c %s $log)
   if [ "$size" = "$last" ]; then idle=$((idle+3)); else idle=0; last=$size; fi
   grep -aq "LADDER DONE" $log && break
-  if [ $idle -ge ${VM_IDLE:-45} ]; then
+  if [ $idle -ge ${VM_IDLE:-120} ]; then
     echo "VM FROZE: no output for ${idle}s; last line: $(tail -c 200 $log | tr -d '\r' | tail -1)" | tee -a $log
     docker kill ladder 2>/dev/null
     break
