@@ -1,0 +1,51 @@
+From aad19f34f49a3dcfab4107d1cd2d236cdaacf1e4 Mon Sep 17 00:00:00 2001
+From: unxed <ivan.sorokin.tech@gmail.com>
+Date: Sat, 19 Sep 2026 08:35:04 +0000
+Subject: [PATCH] DIAG: describe the failing FD_CLONE call in Sys::spawn
+
+---
+ src/platform/redox/mod.rs | 25 +++++++++++++++++++++++--
+ 1 file changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/src/platform/redox/mod.rs b/src/platform/redox/mod.rs
+index 067a922..23c5d50 100644
+--- a/src/platform/redox/mod.rs
++++ b/src/platform/redox/mod.rs
+@@ -1323,11 +1323,32 @@ impl Pal for Sys {
+         //     cwd.as_str()
+         // );
+ 
+-        new_file_table.call_wo(
++        if let Err(e) = new_file_table.call_wo(
+             &new_file_table.as_raw_fd().to_ne_bytes(),
+             syscall::CallFlags::FD | syscall::CallFlags::FD_CLONE,
+             &[new_file_table.as_raw_fd() as u64],
+-        )?;
++        ) {
++            // DIAGNOSTIC: is the descriptor known to the userspace table / to the kernel?
++            let fd = new_file_table.as_raw_fd();
++            let user = {
++                let g = redox_rt::current_filetable();
++                g.iter().any(|(f, _)| f == fd)
++            };
++            let mut buf = [0u8; 64];
++            let kern = syscall::fpath(fd, &mut buf);
++            let ft = new_file_table.fstat(&mut syscall::Stat::default());
++            let msg = alloc::format!(
++                "relibc spawn DIAG: FD_CLONE failed errno={} fd={:#x} userspace_has={} kernel_fpath={:?} fstat={:?} thread={:?}\n",
++                e.errno,
++                fd,
++                user,
++                kern.map_err(|e| e.errno),
++                ft.map_err(|e| e.errno),
++                RtTcb::current().thread_fd().as_raw_fd()
++            );
++            let _ = syscall::write(2, msg.as_bytes());
++            return Err(e.into());
++        }
+ 
+         {
+             let fds_to_close = {
+-- 
+2.43.0
+

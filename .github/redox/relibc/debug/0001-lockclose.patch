@@ -1,0 +1,31 @@
+From 701b53365f6ad2efda160b7f3eee8849c4d966ae Mon Sep 17 00:00:00 2001
+From: unxed <ivan.sorokin.tech@gmail.com>
+Date: Sat, 19 Sep 2026 08:35:04 +0000
+Subject: [PATCH] EXPERIMENT: close() holds the filetable lock across the
+ kernel close
+
+---
+ redox-rt/src/sys.rs | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/redox-rt/src/sys.rs b/redox-rt/src/sys.rs
+index bc44223..9e9709c 100644
+--- a/redox-rt/src/sys.rs
++++ b/redox-rt/src/sys.rs
+@@ -900,10 +900,12 @@ pub fn dup_into_upper_raw(fd: usize, buf: &[u8]) -> Result<usize> {
+ pub fn close(fd: usize) -> Result<usize> {
+     let _siglock = tmp_disable_signals();
+ 
++    // EXPERIMENT: keep the userspace table locked across the kernel close, so that closing a
++    // descriptor and forgetting about it is one step as seen by the other threads.
++    let mut guard = FILETABLE.lock();
+     let res = unsafe { syscall::syscall1(syscall::SYS_CLOSE, fd) };
+ 
+     if res.is_ok() || res.err().is_some_and(|e| e.errno == EBADF) {
+-        let mut guard = FILETABLE.lock();
+         let _ = guard.remove(fd);
+     }
+ 
+-- 
+2.43.0
+
