@@ -174,3 +174,11 @@ No goffi/GPU for this milestone: console (and X11 without FFI, untested) only.
 
 ### Known limitations
 - Asynchronous preemption disabled (see above). No `os/user` cgo. X11 backend not tried.
+
+## 2026-09-19 — f4's X11 backend (pure Go, no FFI) runs on Hurd
+
+`f4 --gui=x11 --attached` in the guest draws into an Xvfb on the CI host over TCP (`DISPLAY=10.0.2.2:1`; QEMU user-mode NIC,
+guest `eth0` = 10.0.2.15 by DHCP, host = 10.0.2.2). Input by xdotool, screenshots by ImageMagick on the host; keys reach f4 through the
+pure-Go xkb backend (`purexkb`). Verified (run-hurd-poc #35411660397): window 100x30 with both panels listing the guest's `/`, F1 help,
+cursor keys, F9 menu, F10 "Leave f4?" -> exit code 0. Screenshots: unxed/sandbox `f4-hurd/screens/`. No X server exists in the image
+(and none is needed): the goffi/GPU backends stay excluded by build tags.
