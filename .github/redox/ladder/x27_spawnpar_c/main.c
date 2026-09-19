@@ -16,7 +16,7 @@
 extern char **environ;
 static pthread_mutex_t big = PTHREAD_MUTEX_INITIALIZER;
 static int errs, hangs, spawned;
-static int noscan;
+static int noscan, lockclose;
 
 static void *worker(void *arg) {
     int fds[2];
@@ -55,22 +55,24 @@ static void *worker(void *arg) {
         else usleep(20000);
         if (i == 199) { __sync_fetch_and_add(&hangs, 1); }
     }
+    if (lockclose) pthread_mutex_lock(&big);
     close(fds[0]);
+    if (lockclose) pthread_mutex_unlock(&big);
     int st; waitpid(p, &st, 0);
     return 0;
 }
 
 static void round_(int threads, int ns) {
-    noscan = ns; errs = hangs = spawned = 0;
+    noscan = ns & 1; lockclose = ns >> 1; errs = hangs = spawned = 0;
     pthread_t t[8];
     for (int i = 0; i < threads; i++) pthread_create(&t[i], 0, worker, 0);
     for (int i = 0; i < threads; i++) pthread_join(t[i], 0);
-    printf("threads=%d scan=%s: spawned %d, spawn errors %d, pipe never EOF %d\n", threads, ns ? "no " : "yes", spawned, errs, hangs);
+    printf("threads=%d scan=%s close=%s: spawned %d, spawn errors %d, pipe never EOF %d\n", threads, (ns & 1) ? "no " : "yes", (ns >> 1) ? "locked  " : "unlocked", spawned, errs, hangs);
     fflush(stdout);
 }
 
 int main(void) {
-    round_(1, 0); round_(4, 0); round_(4, 0); round_(4, 1);
+    round_(1, 0); for (int i = 0; i < 3; i++) { round_(4, 0); round_(4, 2); round_(4, 1); }
     printf("OK x27_spawnpar_c\n");
     _exit(0);
 }
