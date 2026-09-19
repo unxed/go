@@ -1,6 +1,6 @@
 . /root/mnt/common.sh
 # x37 first for every variant: crash-loop trigger (wedges per boot), then the rest
-if [ "$1" = ring ]; then
+if [ "$1" = ring ] || [ "$1" = b27 ] || [ "$1" = f27 ]; then
   # the wedge happens in the x27 phase (children killed by #UD in the loader), skip the x37 warm-up
   loop_run /root/mnt/x27_spawnpar_c.bin default 40 60
   echo "=== LADDER DONE"

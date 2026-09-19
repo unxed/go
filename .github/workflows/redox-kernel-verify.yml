@@ -26,8 +26,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [ring]
-        rep: [1, 2, 3, 4]
+        variant: [b27, f27]
+        rep: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +49,8 @@ jobs:
             both)    git am -3 $K/0001-*.patch $K/0002-*.patch ;;
             dbg)     git am -3 $K/debug/0001-*.patch ;;
             ring)    git am -3 $K/debug/0002-*.patch ;;
+            f27)     git am -3 $K/0003-*.patch ;;
+            b27)     : ;;
             fix)     git am -3 $K/0003-*.patch ;;
             all)     git am -3 $K/0001-*.patch $K/0002-*.patch $K/0003-*.patch ;;
           esac
