@@ -12,13 +12,10 @@ run() { # run <variant> <name> <run#> <limit-seconds>
   if [ -f /tmp/rc.done ]; then rc=`cat /tmp/rc.done`; else echo "HANG $bin"; kill -9 $sp 2>/dev/null; rc=hang; fi
   echo "=== END $bin variant=$v run=$n exit=$rc"
 }
-for v in unpatched patched; do
-  run $v x26_spawn_cloexec_c 1 30
-  run $v x32_poll_regular_c 1 30
-  n=1; while [ $n -le 3 ]; do run $v x33_thread_sigmask_c $n 60; n=$((n+1)); done
-done
+v=${1:-patched}
+run $v x26_spawn_cloexec_c 1 30
+run $v x32_poll_regular_c 1 30
+n=1; while [ $n -le 3 ]; do run $v x33_thread_sigmask_c $n 60; n=$((n+1)); done
 # last: a wedged/panicked VM ends the boot
-for v in unpatched patched; do
-  n=1; while [ $n -le 10 ]; do run $v x27_spawnpar_c $n 60; n=$((n+1)); done
-done
+n=1; while [ $n -le 15 ]; do run $v x27_spawnpar_c $n 60; n=$((n+1)); done
 echo "=== LADDER DONE"
