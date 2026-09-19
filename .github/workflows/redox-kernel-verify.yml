@@ -26,8 +26,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [b27, f27, a27]
-        rep: [1, 2, 3, 4, 5]
+        variant: [baseline, all]
+        rep: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
 
