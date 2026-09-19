@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [unpatched, patched]
+        variant: [unpatched, patched, debug]
     steps:
       - uses: actions/checkout@v4
       - name: Pull redoxer image
@@ -48,12 +48,13 @@ jobs:
           git submodule update --init --recursive --depth 1
           git log -1 --format='%H %s'
       - name: Apply the patches (patched variant only)
-        if: matrix.variant == 'patched'
+        if: matrix.variant != 'unpatched'
         run: |
           cd relibc
           git config user.name ci && git config user.email ci@example.com
           for p in ../.github/redox/relibc/patches/*.patch; do echo "== $p"; git am "$p"; done
-          git log --oneline -5; git diff --stat 69bb008 | tail -3
+          if [ "${{ matrix.variant }}" = debug ]; then git am ../.github/redox/relibc/debug/*.patch; fi
+          git log --oneline -6; git diff --stat 69bb008 | tail -3
       - name: Build relibc inside the redoxer environment
         timeout-minutes: 12
         run: |
@@ -87,7 +88,7 @@ jobs:
         run: |
           docker pull redoxos/redoxer >/dev/null
           mkdir -p /tmp/w/bins && cp -r .github/redox/ladder/x26_spawn_cloexec_c .github/redox/ladder/x27_spawnpar_c .github/redox/ladder/x32_poll_regular_c .github/redox/ladder/x33_thread_sigmask_c /tmp/w/
-          for v in unpatched patched; do
+          for v in unpatched patched debug; do
             for p in x26_spawn_cloexec_c x27_spawnpar_c x32_poll_regular_c x33_thread_sigmask_c; do
               docker run --rm -v /tmp:/tmp -w /tmp/w redoxos/redoxer redoxer cc -O1 -pthread \
                 -Wl,--dynamic-linker=/root/mnt/$v/ld64.so.1 -o bins/${p}_$v.bin $p/main.c
@@ -107,7 +108,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [unpatched, patched]
+        variant: [unpatched, patched, debug]
         rep: [1, 2]
     steps:
       - uses: actions/checkout@v4
@@ -120,11 +121,11 @@ jobs:
         run: |
           mkdir -p vm/bins
           cp art/repro-bins/* vm/bins/
-          for v in unpatched patched; do
+          for v in unpatched patched debug; do
             d=$(find art/relibc-$v -type d -name $v | head -1)
             [ -n "$d" ] && cp -r "$d" vm/$v || echo "no libc for $v"
           done
-          chmod +x vm/bins/* vm/unpatched/* vm/patched/* || true
+          chmod +x vm/bins/* vm/*/* || true
           cp .github/redox/run_relibc_ab.sh vm/
       - name: Run in a Redox VM
         timeout-minutes: 8

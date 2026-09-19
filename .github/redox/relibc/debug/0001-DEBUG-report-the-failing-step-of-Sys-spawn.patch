@@ -1,0 +1,223 @@
+From 697aa9193cd93c1bfa0a5edc57fe661a2a466a0a Mon Sep 17 00:00:00 2001
+From: unxed <ivan.sorokin.tech@gmail.com>
+Date: Sat, 19 Sep 2026 07:04:05 +0000
+Subject: [PATCH] DEBUG: report the failing step of Sys::spawn
+
+---
+ src/platform/redox/mod.rs | 73 +++++++++++++++++++++------------------
+ 1 file changed, 39 insertions(+), 34 deletions(-)
+
+diff --git a/src/platform/redox/mod.rs b/src/platform/redox/mod.rs
+index 067a922..54d87f0 100644
+--- a/src/platform/redox/mod.rs
++++ b/src/platform/redox/mod.rs
+@@ -1201,17 +1201,17 @@ impl Pal for Sys {
+         envp: Option<NulTerminated<*mut c_char>>,
+     ) -> Result<pid_t> {
+         use crate::header::spawn::Flags;
+-        let child = redox_rt::proc::new_child_process(&redox_rt::proc::ForkArgs::Managed)?;
++        let child = redox_rt::proc::new_child_process(&redox_rt::proc::ForkArgs::Managed).map_err(|e| { spawn_dbg(9); e })?;
+         let mut cwd = path::clone_cwd().unwrap_or_default();
+-        let mut cwd_fd = FdGuard::open(cwd.as_str(), syscall::O_STAT)?.to_upper()?;
++        let mut cwd_fd = FdGuard::open(cwd.as_str(), syscall::O_STAT).map_err(|e| { spawn_dbg(1001); e })?.to_upper().map_err(|e| { spawn_dbg(11); e })?;
+         let proc_fd = child.proc_fd.unwrap();
+         let _curr_proc_fd = redox_rt::current_proc_fd(); // TODO use this variable?
+-        let cur_filetable_fd = RtTcb::current().thread_fd().dup_into_upper(b"filetable")?;
+-        let file_table = cur_filetable_fd.dup_into_upper(b"copy")?;
++        let cur_filetable_fd = RtTcb::current().thread_fd().dup_into_upper(b"filetable").map_err(|e| { spawn_dbg(14); e })?;
++        let file_table = cur_filetable_fd.dup_into_upper(b"copy").map_err(|e| { spawn_dbg(15); e })?;
+ 
+         {
+-            let new_file_table = child.thr_fd.dup_into_upper(b"current-filetable")?;
+-            new_file_table.write(&file_table.as_raw_fd().to_ne_bytes())?;
++            let new_file_table = child.thr_fd.dup_into_upper(b"current-filetable").map_err(|e| { spawn_dbg(18); e })?;
++            new_file_table.write(&file_table.as_raw_fd().to_ne_bytes()).map_err(|e| { spawn_dbg(19); e })?;
+         }
+ 
+         let mut args = Vec::new();
+@@ -1229,7 +1229,7 @@ impl Pal for Sys {
+ 
+         args[0] = program.to_bytes();
+ 
+-        let new_file_table = child.thr_fd.dup_into_upper(b"filetable-binary")?;
++        let new_file_table = child.thr_fd.dup_into_upper(b"filetable-binary").map_err(|e| { spawn_dbg(37); e })?;
+ 
+         if let Some(fac) = fac {
+             for action in fac {
+@@ -1243,7 +1243,7 @@ impl Pal for Sys {
+                         let dirfd = {
+                             // TODO: Cannot use cwd_fd (being an upper fd), also
+                             // cannot set cwd_fd as regular fd then call to_upper later
+-                            FdGuard::open(cwd.as_str(), syscall::O_STAT)?
++                            FdGuard::open(cwd.as_str(), syscall::O_STAT).map_err(|e| { spawn_dbg(51); e })?
+                         };
+                         let src_fd = Sys::openat(
+                             dirfd.as_c_fd().ok_or(Errno(EMFILE))?,
+@@ -1255,31 +1255,31 @@ impl Pal for Sys {
+                             &src_fd.to_ne_bytes(),
+                             syscall::CallFlags::FD,
+                             &[u64::try_from(fd).map_err(|_| Errno(EBADFD))?],
+-                        )?;
++                        ).map_err(|e| { spawn_dbg(63); e })?;
+                     }
+                     crate::header::spawn::Action::Close(fd) => {
+                         new_file_table.call_wo(
+                             &(fd as usize).to_ne_bytes(),
+                             syscall::CallFlags::empty(),
+                             &[syscall::flag::FileTableVerb::Close as u64],
+-                        )?;
++                        ).map_err(|e| { spawn_dbg(70); e })?;
+                     }
+                     crate::header::spawn::Action::Chdir(path) => {
+                         let cwd_str =
+-                            core::str::from_utf8(path.as_bytes()).map_err(|_| Errno(EINVAL))?;
+-                        cwd = to_cwd_path(cwd_str)?;
+-                        let fd = FdGuard::open(cwd.as_str(), syscall::O_STAT)?.to_upper()?;
++                            core::str::from_utf8(path.as_bytes()).map_err(|_| Errno(EINVAL)).map_err(|e| { spawn_dbg(74); e })?;
++                        cwd = to_cwd_path(cwd_str).map_err(|e| { spawn_dbg(75); e })?;
++                        let fd = FdGuard::open(cwd.as_str(), syscall::O_STAT).map_err(|e| { spawn_dbg(1002); e })?.to_upper().map_err(|e| { spawn_dbg(76); e })?;
+                         cwd_fd = fd;
+                     }
+                     crate::header::spawn::Action::FChdir(fd) => {
+                         let mut buf = CwdPath::zero_filled();
+                         unsafe {
+                             // SAFETY: Sys::fpath is using str::from_utf8 already
+-                            let res = Sys::fpath(fd, buf.as_bytes_mut())?;
++                            let res = Sys::fpath(fd, buf.as_bytes_mut()).map_err(|e| { spawn_dbg(83); e })?;
+                             buf.set_len(res);
+                         }
+                         cwd = buf;
+-                        let fd = FdGuard::open(cwd.as_str(), syscall::O_STAT)?.to_upper()?;
++                        let fd = FdGuard::open(cwd.as_str(), syscall::O_STAT).map_err(|e| { spawn_dbg(1003); e })?.to_upper().map_err(|e| { spawn_dbg(87); e })?;
+                         cwd_fd = fd;
+                     }
+                     crate::header::spawn::Action::Dup2(old, new) => {
+@@ -1291,7 +1291,7 @@ impl Pal for Sys {
+                                 .as_slice(),
+                             syscall::CallFlags::empty(),
+                             &[syscall::flag::FileTableVerb::Dup2 as u64],
+-                        )?;
++                        ).map_err(|e| { spawn_dbg(99); e })?;
+                     }
+                 }
+             }
+@@ -1300,7 +1300,7 @@ impl Pal for Sys {
+         let dirfd = {
+             // TODO: Cannot use cwd_fd (being an upper fd), also
+             // cannot set cwd_fd as regular fd then call to_upper later
+-            FdGuard::open(cwd.as_str(), syscall::O_STAT)?
++            FdGuard::open(cwd.as_str(), syscall::O_STAT).map_err(|e| { spawn_dbg(108); e })?
+         };
+ 
+         let executable = Sys::openat(
+@@ -1308,10 +1308,10 @@ impl Pal for Sys {
+             program,
+             fcntl::O_RDONLY,
+             0,
+-        )?;
+-        let executable = FdGuard::new(executable as usize).to_upper()?;
++        ).map_err(|e| { spawn_dbg(116); e })?;
++        let executable = FdGuard::new(executable as usize).to_upper().map_err(|e| { spawn_dbg(117); e })?;
+         let mut executable_stat = syscall::Stat::default();
+-        executable.fstat(&mut executable_stat)?;
++        executable.fstat(&mut executable_stat).map_err(|e| { spawn_dbg(119); e })?;
+         drop(dirfd);
+ 
+         // println!(
+@@ -1327,7 +1327,7 @@ impl Pal for Sys {
+             &new_file_table.as_raw_fd().to_ne_bytes(),
+             syscall::CallFlags::FD | syscall::CallFlags::FD_CLONE,
+             &[new_file_table.as_raw_fd() as u64],
+-        )?;
++        ).map_err(|e| { spawn_dbg(135); e })?;
+ 
+         {
+             let fds_to_close = {
+@@ -1365,7 +1365,7 @@ impl Pal for Sys {
+             &cwd_fd.as_raw_fd().to_ne_bytes(),
+             syscall::CallFlags::FD | syscall::CallFlags::FD_CLONE,
+             &[cwd_fd.as_raw_fd() as u64],
+-        )?;
++        ).map_err(|e| { spawn_dbg(173); e })?;
+ 
+         let extra_info = redox_rt::proc::ExtraInfo {
+             cwd: Some(cwd.as_bytes()),
+@@ -1391,13 +1391,13 @@ impl Pal for Sys {
+         };
+ 
+         if let Some(attr) = fat {
+-            let flags = Flags::from_bits(attr.flags).ok_or(Errno(EINVAL))?;
++            let flags = Flags::from_bits(attr.flags).ok_or(Errno(EINVAL)).map_err(|e| { spawn_dbg(199); e })?;
+ 
+             if flags.contains(Flags::POSIX_SPAWN_SETPGROUP) && attr.pgroup != 0 {
+                 redox_rt::sys::posix_setpgid(
+                     proc_fd.as_raw_fd(),
+                     usize::try_from(attr.pgroup).map_err(|_| Errno(EINVAL))?,
+-                )?;
++                ).map_err(|e| { spawn_dbg(205); e })?;
+             }
+ 
+             let set_schedparam = || -> Result<()> {
+@@ -1417,10 +1417,10 @@ impl Pal for Sys {
+ 
+             // scheduling paramters must be set regardless of whether the flag POSIX_SPAWN_SETSCHEDPARAM is set
+             if flags.contains(Flags::POSIX_SPAWN_SETSCHEDULER) {
+-                set_schedparam()?;
+-                set_scheduler()?;
++                set_schedparam().map_err(|e| { spawn_dbg(225); e })?;
++                set_scheduler().map_err(|e| { spawn_dbg(226); e })?;
+             } else if flags.contains(Flags::POSIX_SPAWN_SETSCHEDPARAM) {
+-                set_schedparam()?;
++                set_schedparam().map_err(|e| { spawn_dbg(228); e })?;
+             }
+ 
+             let parent_resugid = redox_rt::sys::posix_getresugid();
+@@ -1447,7 +1447,7 @@ impl Pal for Sys {
+                     sgid: None,
+                 },
+                 Some(proc_fd.as_raw_fd()),
+-            )?;
++            ).map_err(|e| { spawn_dbg(255); e })?;
+ 
+             // if POSIX_SPAWN_SETSIGDEF flag is set, the signals specified in
+             // sigdefault must have default actions
+@@ -1467,12 +1467,12 @@ impl Pal for Sys {
+             envs.as_slice(),
+             &extra_info,
+             None,
+-        )? {
++        ).map_err(|e| { spawn_dbg(275); e })? {
+             let interp_path =
+-                CStr::from_bytes_with_nul(&interp_path).map_err(|_| Errno(ENOEXEC))?;
++                CStr::from_bytes_with_nul(&interp_path).map_err(|_| Errno(ENOEXEC)).map_err(|e| { spawn_dbg(277); e })?;
+             let interp_path =
+-                RedoxReference::new_from_c(interp_path.to_cstr()).ok_or(Errno(ENOEXEC))?;
+-            let interpreter = FdGuard::open(interp_path.as_ref(), syscall::O_RDONLY)?.to_upper()?;
++                RedoxReference::new_from_c(interp_path.to_cstr()).ok_or(Errno(ENOEXEC)).map_err(|e| { spawn_dbg(279); e })?;
++            let interpreter = FdGuard::open(interp_path.as_ref(), syscall::O_RDONLY).map_err(|e| { spawn_dbg(1004); e })?.to_upper().map_err(|e| { spawn_dbg(280); e })?;
+ 
+             redox_rt::proc::fexec_impl(
+                 interpreter,
+@@ -1487,8 +1487,8 @@ impl Pal for Sys {
+             .unwrap();
+         }
+ 
+-        let start_fd = child.thr_fd.dup_into_upper(b"start")?;
+-        start_fd.write(&[0])?;
++        let start_fd = child.thr_fd.dup_into_upper(b"start").map_err(|e| { spawn_dbg(295); e })?;
++        start_fd.write(&[0]).map_err(|e| { spawn_dbg(296); e })?;
+ 
+         Ok(pid_t::try_from(child.pid).unwrap())
+     }
+@@ -1860,3 +1860,8 @@ impl Sys {
+         }
+     }
+ }
++
++fn spawn_dbg(line: usize) {
++    let msg = alloc::format!("relibc spawn DEBUG: failed at spawn() body line {}\n", line);
++    let _ = syscall::write(2, msg.as_bytes());
++}
+-- 
+2.43.0
+
