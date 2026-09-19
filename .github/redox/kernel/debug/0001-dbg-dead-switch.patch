@@ -1,0 +1,126 @@
+From 22e77922c65e26cd311b8a9c42208accc28d401e Mon Sep 17 00:00:00 2001
+From: unxed <ivan.sorokin.tech@gmail.com>
+Date: Sat, 19 Sep 2026 08:37:06 +0000
+Subject: [PATCH] DEBUG: report why a dead context keeps running after
+ context::switch
+
+---
+ src/context/switch.rs  | 44 ++++++++++++++++++++++++++++++++++++++++++
+ src/cpu_stats.rs       |  4 ++++
+ src/syscall/process.rs |  3 ++-
+ 3 files changed, 50 insertions(+), 1 deletion(-)
+
+diff --git a/src/context/switch.rs b/src/context/switch.rs
+index e4f6cac..1bac75a 100644
+--- a/src/context/switch.rs
++++ b/src/context/switch.rs
+@@ -187,12 +187,47 @@ pub fn switch(token: &mut CleanLockToken) -> SwitchResult {
+ 
+     switch_inner(percpu, schedule_time, token)
+ }
++/// DEBUG: describe the current and sched contexts if the current one is Dead.
++fn dbg_dead(percpu: &PercpuBlock, token: &mut CleanLockToken) -> bool {
++    let cur = Arc::clone(&*percpu.switch_internals.current_context());
++    let dead = match cur.try_read(token.token()) {
++        Some(g) => matches!(g.status, super::Status::Dead { .. }),
++        None => false,
++    };
++    if dead {
++        let sched = Arc::clone(&*percpu.switch_internals.sched_context());
++        let idle = Arc::clone(&*percpu.switch_internals.idle_context());
++        let (cid, cname) = cur
++            .try_read(token.token())
++            .map(|g| (g.debug_id, alloc::string::String::from(g.name.as_str())))
++            .unwrap_or((0, alloc::string::String::new()));
++        let sinfo = sched
++            .try_read(token.token())
++            .map(|g| alloc::format!("id={} status={:?} running={} cur_sched={} is_idle={}", g.debug_id, g.status, g.running, g.currently_scheduled, Arc::ptr_eq(&sched, &idle)))
++            .unwrap_or_else(|| alloc::string::String::from("locked"));
++        println!(
++            "DBGDEAD cpu={} dead current id={} name={} ; sched: {} ; same={} was_idle_state={}",
++            percpu.cpu_id.get(),
++            cid,
++            cname,
++            sinfo,
++            Arc::ptr_eq(&cur, &sched),
++            percpu.stats.state_dbg()
++        );
++    }
++    dead
++}
++
+ fn switch_inner(
+     percpu: &PercpuBlock,
+     schedule_time: u128,
+     token: &mut CleanLockToken,
+ ) -> SwitchResult {
++    let dbg = dbg_dead(percpu, token);
+     if try_direct_switch_back(percpu, schedule_time, token) {
++        if dbg {
++            println!("DBGDEAD: try_direct_switch_back switched and RETURNED here (dead context resumed)");
++        }
+         return SwitchResult::Switched;
+     }
+ 
+@@ -211,6 +246,9 @@ fn switch_inner(
+             ),
+             // didn't change sched context, so will not change current context
+             ScheduleResult::AllContextsIdle => {
++                if dbg {
++                    println!("DBGDEAD: schedule() -> AllContextsIdle with a dead current context");
++                }
+                 percpu.stats.set_state(cpu_stats::CpuState::Idle);
+ 
+                 return SwitchResult::AllContextsIdle;
+@@ -225,6 +263,9 @@ fn switch_inner(
+     ) {
+         // We had already switched the current context to the one now picked by the scheduler, so
+         // no switch needs to be done.
++        if dbg {
++            println!("DBGDEAD: early return, scheduler picked the (dead) current context");
++        }
+         return SwitchResult::Switched;
+     }
+     let current_context_guard = if Arc::ptr_eq(
+@@ -258,6 +299,9 @@ fn switch_inner(
+         );
+     }
+ 
++    if dbg {
++        println!("DBGDEAD: switch_to returned into the dead context (it was switched back to)");
++    }
+     SwitchResult::Switched
+ }
+ enum ScheduleResult {
+diff --git a/src/cpu_stats.rs b/src/cpu_stats.rs
+index aa02fd4..98316e6 100644
+--- a/src/cpu_stats.rs
++++ b/src/cpu_stats.rs
+@@ -80,6 +80,10 @@ pub struct CpuStatsData {
+ impl CpuStats {
+     /// Set the CPU's current state for the following ticks.
+     #[inline]
++    pub fn state_dbg(&self) -> u8 {
++        self.state.load(core::sync::atomic::Ordering::Relaxed)
++    }
++
+     pub fn set_state(&self, new_state: CpuState) {
+         self.state.store(new_state as u8, Ordering::Relaxed);
+     }
+diff --git a/src/syscall/process.rs b/src/syscall/process.rs
+index a89f80b..91083a1 100644
+--- a/src/syscall/process.rs
++++ b/src/syscall/process.rs
+@@ -79,7 +79,8 @@ pub fn exit_this_context(excp: Option<syscall::Exception>, token: &mut CleanLock
+         drop(context_ref);
+     }
+     drop(close_files);
+-    context::switch(token);
++    let dbg_result = context::switch(token);
++    println!("DBGDEAD exit_this_context: switch returned {:?}", dbg_result as u8);
+     unreachable!();
+ }
+ 
+-- 
+2.43.0
+
