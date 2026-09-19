@@ -136,3 +136,41 @@ stop-the-world can wait for it forever. Cooperative preemption still works. Revi
 ### Tooling notes
 - `run_poc.py` runs every `poc/gotests/*.bin` under a guest-side `timeout -s KILL 60` (never Ctrl-C: it kills QEMU).
 - `run-hurd-poc.yml` inputs: `mkhurd` (regenerate zerrors/ztypes), `loops` (10x flakiness statistics).
+
+## 2026-09-19 — f4 (unxed/f4) runs on real Hurd: console + panels + built-in terminal
+
+`hurd-f4-build.yml` (push to `.github/f4-ref` triggers it) cross-compiles `unxed/f4` with this toolchain
+(`CGO_ENABLED=0`); `run-hurd-poc.yml` runs it in QEMU (KVM when the runner has it). Result (run #35409126369):
+two-panel UI on `/` (22 entries), a command typed on the command line runs through the built-in terminal
+(PTY + fork/exec + bash: `echo f4-$((20+22))-ok` prints `f4-42-ok`), F10 -> "Leave f4?" -> exit code 0.
+No goffi/GPU for this milestone: console (and X11 without FFI, untested) only.
+
+### How f4 is built for Hurd (CI only; nothing of this is in unxed/f4 yet)
+- `go mod vendor`, then `.github/scripts/hurd_retag.py` treats `hurd` like `solaris` in `//go:build`
+  lines of vendored deps and f4 itself (libc OS without FFI: picks the no-FFI stubs, unix code paths).
+  `x/sys` and `x/net` are skipped. f4's own retagged files: `misc/hurd/f4-own-changes.patch`.
+- `golang.org/x/sys/unix` has no gc/hurd port: `misc/hurd/xsys-unix/` is a stand-in copied over
+  `vendor/golang.org/x/sys/unix` (API used by f4 and its deps only; constants generated from
+  `syscall/zerrors_hurd_amd64.go`). libc calls outside `syscall` do not link (R_PCREL/R_ADDR against
+  SDYNIMPORT), so the shim reaches them through one pushed linkname, `syscall.extCall`
+  (`src/syscall/ext_hurd.go`: tcgetattr/tcsetattr/ioctl/poll/mprotect/fchmodat/flock/getpgid/posix_openpt/...;
+  dispatch is a `switch` because data tables of dynamic-import addresses are not linkable either).
+- `misc/hurd/f4-overlay/internal/terminal/pty_hurd.go`: PTY backend. Measured (poc/pty_poc.c): BSD ptys
+  (master `/dev/ptyXN`, slave `/dev/ttyXN`, no /dev/ptmx or /dev/pts); posix_openpt/grantpt/unlockpt/
+  ptsname work; master is non-blocking and pollable; TIOCSCTTY after setsid works; TIOCGPGRP on the
+  master fails (IsBusy asks the slave). afero: BADFD is EBADF on Hurd (no EBADFD).
+- What still needs upstream work: f4/vtui/vtinput constraints for hurd, `pty_hurd.go`, an x/sys/unix Hurd
+  port (or a hurd shim module), afero `const_bsds.go`.
+
+### Runtime bugs found by running f4 (fixed)
+- **Threads**: glibc Hurd's default pthread stack is 8 MB of *committed* memory; with 2 GB of RAM
+  `pthread_create` returns EAGAIN after ~236 threads (C probe poc/thr_poc.c: 400 threads fine with 256K/64K
+  stacks; anonymous mmap tops out at ~1.85 GB even untouched). Every goroutine blocked in a libc call holds an
+  OS thread (`entersyscallblock`), so f4's daemon died with `failed to create new OS thread` at 11-24
+  threads. `newosproc` now asks for 1 MB (+64K) stacks, what `tstart_sysvicall` assumes anyway.
+  `t_threads` (100 blocked readers) passes.
+- f4 quirks under emulation: `daemonStartTimeout` (10 s) in f4's session code is too short for TCG;
+  KVM removes the problem.
+
+### Known limitations
+- Asynchronous preemption disabled (see above). No `os/user` cgo. X11 backend not tried.
