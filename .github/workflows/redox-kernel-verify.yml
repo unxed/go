@@ -26,8 +26,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [b27, f27]
-        rep: [1, 2, 3, 4, 5, 6, 7, 8]
+        variant: [b27, f27, a27]
+        rep: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v4
 
@@ -51,6 +51,7 @@ jobs:
             ring)    git am -3 $K/debug/0002-*.patch ;;
             f27)     git am -3 $K/0003-*.patch ;;
             b27)     : ;;
+            a27)     git am -3 $K/0001-*.patch $K/0002-*.patch $K/0003-*.patch ;;
             fix)     git am -3 $K/0003-*.patch ;;
             all)     git am -3 $K/0001-*.patch $K/0002-*.patch $K/0003-*.patch ;;
           esac
@@ -99,7 +100,7 @@ jobs:
         run: |
           k=""
           [ "${{ matrix.variant }}" != stock ] && k=/tmp/kbuild/kernel
-          VM_TIMEOUT=500 .github/redox/vm_run.sh "run_kernel_ab.sh ${{ matrix.variant }}" /tmp/kab.log $k
+          VM_TIMEOUT=500 VM_IDLE=100 .github/redox/vm_run.sh "run_kernel_ab.sh ${{ matrix.variant }}" /tmp/kab.log $k
 
       - uses: actions/upload-artifact@v4
         if: always()
