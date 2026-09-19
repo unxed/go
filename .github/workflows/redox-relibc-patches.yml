@@ -59,6 +59,7 @@ jobs:
       - name: Build relibc inside the redoxer environment
         timeout-minutes: 12
         run: |
+          set -o pipefail
           docker run --rm -v "$PWD/relibc:/src" -v "$PWD/.github/redox/relibc:/scripts:ro" redoxos/redoxer \
             sh /scripts/build_relibc.sh 2>&1 | tee build-${{ matrix.variant }}.log
       - name: Collect libc.so
@@ -126,6 +127,7 @@ jobs:
             d=$(find art/relibc-$v -type d -name $v | head -1)
             [ -n "$d" ] && cp -r "$d" vm/$v || echo "no libc for $v"
           done
+          for v in unpatched no6 patched; do [ -s vm/$v/libc.so ] || { echo "MISSING libc.so for $v: its build failed"; exit 1; }; done
           chmod +x vm/bins/* vm/*/* || true
           cp .github/redox/run_relibc_ab.sh vm/
       - name: Run in a Redox VM

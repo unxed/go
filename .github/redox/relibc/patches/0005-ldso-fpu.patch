@@ -1,6 +1,6 @@
-From 0264de1f920bfdb398a86e0ea9c9de2bba483f00 Mon Sep 17 00:00:00 2001
+From 02ee2305c6761f1de803f40c0c65a7d2c9c1c1e4 Mon Sep 17 00:00:00 2001
 From: unxed <ivan.sorokin.tech@gmail.com>
-Date: Sat, 19 Sep 2026 08:53:48 +0000
+Date: Sat, 19 Sep 2026 11:56:08 +0000
 Subject: [PATCH] ld_so: initialise the FPU control state before running any
  Rust code
 
@@ -19,7 +19,7 @@ Set the ABI defaults (fninit; ldmxcsr 0x1f80) at the top of the loader's x86_64 
  1 file changed, 9 insertions(+)
 
 diff --git a/ld_so/src/lib.rs b/ld_so/src/lib.rs
-index ca22a2f..c5b8495 100644
+index ca22a2f..9bb6261 100644
 --- a/ld_so/src/lib.rs
 +++ b/ld_so/src/lib.rs
 @@ -88,6 +88,15 @@ global_asm!(
@@ -28,9 +28,9 @@ index ca22a2f..c5b8495 100644
  _start:
 +    # A process created by posix_spawn starts with all-zero FPU control state (a forked or
 +    # exec'ed one inherits sane values). MXCSR = 0 leaves every SSE exception unmasked, and
-+    # since CR4.OSXMMEXCPT is not set the first inexact result raises #UD ("Invalid opcode
-+    # fault") -- in this loader, before crt0 gets a chance to initialise the state. Set the
-+    # ABI defaults (x87 CW 0x37f via fninit, MXCSR 0x1f80) before running any Rust code.
++    # since CR4.OSXMMEXCPT is not set the first inexact result raises #UD (an invalid opcode
++    # fault) in this loader, before crt0 gets a chance to initialise the state. Set the ABI
++    # defaults (x87 CW 0x37f via fninit, MXCSR 0x1f80) before running any Rust code.
 +    fninit
 +    mov DWORD PTR [rsp - 8], 0x00001F80
 +    ldmxcsr [rsp - 8]

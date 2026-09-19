@@ -8,6 +8,11 @@ for m in re.finditer(r"=== BEGIN \S*?/(\w+?)_(unpatched|patched)\.bin variant=\w
     name, v, n, out, rc = m.groups()
     r = rows.setdefault((name, v), dict(runs=0, ok=0, fail=0, hang=0, extra=0))
     r["runs"] += 1
+    if not re.search(r"^(threads=|OK |cat exited|regular file|handler runs|fork\+exec)", out, re.M) and "HANG" not in out:
+        r["fail"] += 0  # (counted below)
+    r.setdefault("real", 0)
+    if re.search(r"^(threads=|handler runs|regular file alone|fork\+exec:)", out, re.M):
+        r["real"] += 1
     if "HANG" in out: r["hang"] += 1
     elif re.search(r"^OK %s" % name, out, re.M): r["ok"] += 1
     else: r["fail"] += 1
@@ -17,7 +22,7 @@ for m in re.finditer(r"=== BEGIN \S*?/(\w+?)_(unpatched|patched)\.bin variant=\w
         r["extra"] += sum(int(x) for x in re.findall(r"had SIGUSR1 blocked: (\d+)", out))
 md = ["| repro | variant | runs | OK | FAIL | HANG | counter (x27: spawn errors, x33: wrong-thread handler runs) |", "|---|---|---|---|---|---|---|"]
 for (name, v), r in rows.items():
-    md.append(f"| {name} | {v} | {r['runs']} | {r['ok']} | {r['fail']} | {r['hang']} | {r['extra'] if name in ('x27_spawnpar_c','x33_thread_sigmask_c') else ''} |")
+    md.append(f"| {name} | {v} | {r['runs']} (produced output: {r['real']}) | {r['ok']} | {r['fail']} | {r['hang']} | {r['extra'] if name in ('x27_spawnpar_c','x33_thread_sigmask_c') else ''} |")
 faults = len(re.findall(r"^Invalid opcode fault", log, re.M))
 zero = len(re.findall(r"^Page fault: 0000000000000000 US \| ID", log, re.M))
 md.append(f"zero-register thread faults (Page fault at RIP 0): {zero}")
