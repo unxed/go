@@ -1,4 +1,4 @@
-From 22e77922c65e26cd311b8a9c42208accc28d401e Mon Sep 17 00:00:00 2001
+From f181899c6efd897ea68292e1944c43ac6c53f74b Mon Sep 17 00:00:00 2001
 From: unxed <ivan.sorokin.tech@gmail.com>
 Date: Sat, 19 Sep 2026 08:37:06 +0000
 Subject: [PATCH] DEBUG: report why a dead context keeps running after
@@ -11,7 +11,7 @@ Subject: [PATCH] DEBUG: report why a dead context keeps running after
  3 files changed, 50 insertions(+), 1 deletion(-)
 
 diff --git a/src/context/switch.rs b/src/context/switch.rs
-index e4f6cac..1bac75a 100644
+index e4f6cac..66034aa 100644
 --- a/src/context/switch.rs
 +++ b/src/context/switch.rs
 @@ -187,12 +187,47 @@ pub fn switch(token: &mut CleanLockToken) -> SwitchResult {
@@ -19,7 +19,7 @@ index e4f6cac..1bac75a 100644
      switch_inner(percpu, schedule_time, token)
  }
 +/// DEBUG: describe the current and sched contexts if the current one is Dead.
-+fn dbg_dead(percpu: &PercpuBlock, token: &mut CleanLockToken) -> bool {
++fn dbg_dead(percpu: &PercpuBlock, token: &mut CleanLockToken) -> Option<alloc::string::String> {
 +    let cur = Arc::clone(&*percpu.switch_internals.current_context());
 +    let dead = match cur.try_read(token.token()) {
 +        Some(g) => matches!(g.status, super::Status::Dead { .. }),
@@ -36,17 +36,17 @@ index e4f6cac..1bac75a 100644
 +            .try_read(token.token())
 +            .map(|g| alloc::format!("id={} status={:?} running={} cur_sched={} is_idle={}", g.debug_id, g.status, g.running, g.currently_scheduled, Arc::ptr_eq(&sched, &idle)))
 +            .unwrap_or_else(|| alloc::string::String::from("locked"));
-+        println!(
-+            "DBGDEAD cpu={} dead current id={} name={} ; sched: {} ; same={} was_idle_state={}",
++        return Some(alloc::format!(
++            "cpu={} dead current id={} name={} ; sched: {} ; same={} was_idle_state={}",
 +            percpu.cpu_id.get(),
 +            cid,
 +            cname,
 +            sinfo,
 +            Arc::ptr_eq(&cur, &sched),
 +            percpu.stats.state_dbg()
-+        );
++        ));
 +    }
-+    dead
++    None
 +}
 +
  fn switch_inner(
@@ -56,8 +56,8 @@ index e4f6cac..1bac75a 100644
  ) -> SwitchResult {
 +    let dbg = dbg_dead(percpu, token);
      if try_direct_switch_back(percpu, schedule_time, token) {
-+        if dbg {
-+            println!("DBGDEAD: try_direct_switch_back switched and RETURNED here (dead context resumed)");
++        if let Some(d) = &dbg {
++            println!("DBGDEAD: try_direct_switch_back switched and RETURNED here (dead context resumed): {}", d);
 +        }
          return SwitchResult::Switched;
      }
@@ -66,8 +66,8 @@ index e4f6cac..1bac75a 100644
              ),
              // didn't change sched context, so will not change current context
              ScheduleResult::AllContextsIdle => {
-+                if dbg {
-+                    println!("DBGDEAD: schedule() -> AllContextsIdle with a dead current context");
++                if let Some(d) = &dbg {
++                    println!("DBGDEAD: schedule() -> AllContextsIdle with a dead current context: {}", d);
 +                }
                  percpu.stats.set_state(cpu_stats::CpuState::Idle);
  
@@ -76,8 +76,8 @@ index e4f6cac..1bac75a 100644
      ) {
          // We had already switched the current context to the one now picked by the scheduler, so
          // no switch needs to be done.
-+        if dbg {
-+            println!("DBGDEAD: early return, scheduler picked the (dead) current context");
++        if let Some(d) = &dbg {
++            println!("DBGDEAD: early return, scheduler picked the (dead) current context: {}", d);
 +        }
          return SwitchResult::Switched;
      }
@@ -86,8 +86,8 @@ index e4f6cac..1bac75a 100644
          );
      }
  
-+    if dbg {
-+        println!("DBGDEAD: switch_to returned into the dead context (it was switched back to)");
++    if let Some(d) = &dbg {
++        println!("DBGDEAD: switch_to returned into the dead context (it was switched back to): {}", d);
 +    }
      SwitchResult::Switched
  }

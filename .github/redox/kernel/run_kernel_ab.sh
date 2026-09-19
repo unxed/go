@@ -1,4 +1,10 @@
 . /root/mnt/common.sh
+if [ "$1" = dbg ]; then
+  # debug kernel: only the spawn stress, as long as it takes to wedge (DBGDEAD lines say why)
+  loop_run /root/mnt/x27_spawnpar_c.bin default 80 60
+  echo "=== LADDER DONE"
+  exit 0
+fi
 # futex vs fork (x23): "fork, child alive" must wake 4/4 (0002-*.patch)
 run_one /root/mnt/x23_futex_fork_c.bin default 1 90
 run_one /root/mnt/x23_futex_fork_c.bin default 2 90
