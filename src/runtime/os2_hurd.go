@@ -31,6 +31,7 @@ import (
 //go:cgo_import_dynamic libc_pthread_attr_init pthread_attr_init "libc.so.0.3"
 //go:cgo_import_dynamic libc_pthread_attr_setdetachstate pthread_attr_setdetachstate "libc.so.0.3"
 //go:cgo_import_dynamic libc_pthread_attr_setstack pthread_attr_setstack "libc.so.0.3"
+//go:cgo_import_dynamic libc_pthread_attr_setstacksize pthread_attr_setstacksize "libc.so.0.3"
 //go:cgo_import_dynamic libc_pthread_create pthread_create "libpthread.so.0.3"
 //go:cgo_import_dynamic libc_pthread_self pthread_self "libpthread.so.0.3"
 //go:cgo_import_dynamic libc_pthread_kill pthread_kill "libpthread.so.0.3"
@@ -73,6 +74,7 @@ import (
 //go:linkname libc_pthread_attr_init libc_pthread_attr_init
 //go:linkname libc_pthread_attr_setdetachstate libc_pthread_attr_setdetachstate
 //go:linkname libc_pthread_attr_setstack libc_pthread_attr_setstack
+//go:linkname libc_pthread_attr_setstacksize libc_pthread_attr_setstacksize
 //go:linkname libc_pthread_create libc_pthread_create
 //go:linkname libc_pthread_self libc_pthread_self
 //go:linkname libc_pthread_kill libc_pthread_kill
@@ -116,6 +118,7 @@ var (
 	libc_pthread_attr_init,
 	libc_pthread_attr_setdetachstate,
 	libc_pthread_attr_setstack,
+	libc_pthread_attr_setstacksize,
 	libc_pthread_create,
 	libc_pthread_self,
 	libc_pthread_kill,
@@ -141,6 +144,8 @@ var (
 	libc_getgid,
 	libc_getegid libcFunc
 )
+
+const _THREAD_STACK_SIZE = 0x100000 + 0x10000
 
 const (
 	// glibc's generic <bits/time.h> clockid_t values, confirmed on real
@@ -198,6 +203,16 @@ func newosproc(mp *m) {
 
 	if pthread_attr_setdetachstate(&attr, _PTHREAD_CREATE_DETACHED) != 0 {
 		throw("pthread_attr_setdetachstate")
+	}
+
+	// glibc's default thread stack on Hurd is 8 MB of committed (not merely
+	// reserved) memory: with 2 GB of RAM the process runs out after ~230 threads,
+	// and a Go program that blocks in many libc calls (each occupies a thread)
+	// died at a couple of dozen (measured: unxed/debian-hurd poc/thr_poc.c). The
+	// scheduler stack tstart_sysvicall lays out on it assumes 1 MB, so ask for
+	// that plus a guard's worth.
+	if pthread_attr_setstacksize(&attr, _THREAD_STACK_SIZE) != 0 {
+		throw("pthread_attr_setstacksize")
 	}
 
 	// Disable signals during create, so that the new thread starts
@@ -480,6 +495,10 @@ func pthread_attr_init(attr *pthreadattr) int32 {
 
 func pthread_attr_setdetachstate(attr *pthreadattr, state int32) int32 {
 	return int32(sysvicall2(&libc_pthread_attr_setdetachstate, uintptr(unsafe.Pointer(attr)), uintptr(state)))
+}
+
+func pthread_attr_setstacksize(attr *pthreadattr, size uint64) int32 {
+	return int32(sysvicall2(&libc_pthread_attr_setstacksize, uintptr(unsafe.Pointer(attr)), uintptr(size)))
 }
 
 func pthread_attr_setstack(attr *pthreadattr, addr uintptr, size uint64) int32 {
