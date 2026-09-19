@@ -19,6 +19,8 @@ md = ["| repro | variant | runs | OK | FAIL | HANG | counter (x27: spawn errors,
 for (name, v), r in rows.items():
     md.append(f"| {name} | {v} | {r['runs']} | {r['ok']} | {r['fail']} | {r['hang']} | {r['extra'] if name in ('x27_spawnpar_c','x33_thread_sigmask_c') else ''} |")
 faults = len(re.findall(r"^Invalid opcode fault", log, re.M))
+zero = len(re.findall(r"^Page fault: 0000000000000000 US \| ID", log, re.M))
+md.append(f"zero-register thread faults (Page fault at RIP 0): {zero}")
 md.append(f"\nInvalid opcode faults (a spawned child killed in the loader before main): {faults}; VM froze: {'yes' if 'VM FROZE' in log else 'no'}; kernel panic: {'yes' if 'KERNEL PANIC' in log else 'no'}")
 if "VM FROZE" in log or "KERNEL PANIC" in log:
     md.append("\nVM froze / kernel panic during the run (later runs missing)")
